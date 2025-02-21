@@ -18,7 +18,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '16'
+          node-version: "18"
 
       # Install dependencies
       - name: Install dependencies
@@ -28,9 +28,11 @@ jobs:
       - name: Package Lambda code
         run: |
           mkdir -p lambda_package
-          cp -r * lambda_package/
+          cp -r * lambda_package/  # Copy all contents except the lambda_package directory itself
+          rm -rf lambda_package/lambda_package  # Remove any nested 'lambda_package' folder
           cd lambda_package
           zip -r ../lambda_code.zip .
+
 
       # Set up AWS credentials using the OIDC role
       - name: Set up AWS credentials
