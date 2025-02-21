@@ -27,11 +27,15 @@ jobs:
       # Zip the Lambda code (including node_modules and .js files)
       - name: Package Lambda code
         run: |
+# Zip the Lambda code (including node_modules and .js files)
+      - name: Package Lambda code
+        run: |
           mkdir -p lambda_package
-          cp -r * lambda_package/  # Copy all contents except the lambda_package directory itself
-          rm -rf lambda_package/lambda_package  # Remove any nested 'lambda_package' folder
+          shopt -s extglob
+          cp -r !(lambda_package) lambda_package/
           cd lambda_package
           zip -r ../lambda_code.zip .
+
 
 
       # Set up AWS credentials using the OIDC role
