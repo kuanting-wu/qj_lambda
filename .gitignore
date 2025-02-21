@@ -1,0 +1,42 @@
+# Node.js dependencies
+node_modules/
+
+# Logs
+*.log
+
+# Environment variables (e.g., containing sensitive data like AWS keys)
+.env
+
+# macOS specific files
+.DS_Store
+
+# Windows specific files
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+
+# npm package-lock file
+package-lock.json
+
+# Build and coverage directories
+dist/
+build/
+coverage/
+
+# AWS Lambda deployment package
+lambda-deployment.zip
+
+# IDEs and text editors
+.vscode/
+.idea/
+
+# Jest testing files (if using Jest)
+test-logs/
+
+# Serverless specific files (if using Serverless Framework)
+.serverless/
+
+# AWS SAM build artifacts (if using AWS SAM)
+.aws-sam/

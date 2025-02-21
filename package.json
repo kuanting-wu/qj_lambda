@@ -1,0 +1,19 @@
+{
+  "name": "qj_lambda",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.750.0",
+    "bcryptjs": "^3.0.2",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.12.0",
+    "uuid": "^11.1.0"
+  }
+}
