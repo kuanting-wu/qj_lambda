@@ -1,4 +1,4 @@
-name: Build and Upload Lambda Code to S3
+name: Package Lambda Code and Upload to S3
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  build-and-upload:
+  package-and-upload:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,15 +18,19 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '16'  # You can adjust the Node.js version as needed
+          node-version: '16'
 
       # Install dependencies
       - name: Install dependencies
         run: npm install
 
-      # Build the project
-      - name: Build project
-        run: npm run build
+      # Zip the Lambda code (including node_modules and .js files)
+      - name: Package Lambda code
+        run: |
+          mkdir -p lambda_package
+          cp -r * lambda_package/
+          cd lambda_package
+          zip -r ../lambda_code.zip .
 
       # Set up AWS credentials using the OIDC role
       - name: Set up AWS credentials
@@ -35,13 +39,11 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      # Upload the build output to S3
-      - name: Upload build output to S3
+      # Upload the zip file to S3
+      - name: Upload zip file to S3
         run: |
-          # Replace 'build-output-directory' with the actual build directory
-          aws s3 cp ./build/ s3://${{ secrets.S3_BUCKET_NAME }}/ --recursive
+          aws s3 cp ./lambda_code.zip s3://${{ secrets.S3_BUCKET_NAME }}/lambda_code.zip
 
-      # Optionally, clean up after uploading
+      # Optionally clean up
       - name: Clean up
-        run: |
-          rm -rf ./build
+        run: rm -rf lambda_package
