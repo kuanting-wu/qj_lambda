@@ -1,15 +1,24 @@
-const mysql = require('mysql2');
+const { SecretsManager } = require('aws-sdk');
+const mysql = require('mysql2/promise');
 
-const dbConfig = {
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 3306,
+const secretsManager = new SecretsManager();
+
+const getDBConfig = async () => {
+  const secret = await secretsManager
+    .getSecretValue({ SecretId: "my-db-credentials" }) // Replace with your actual secret name
+    .promise();
+  return JSON.parse(secret.SecretString);
 };
 
 const getDBConnection = async () => {
-  return mysql.createConnection(dbConfig);
+  const dbConfig = await getDBConfig();
+  return mysql.createConnection({
+    host: dbConfig.host,
+    user: dbConfig.username,
+    password: dbConfig.password,
+    database: dbConfig.dbname,
+    port: dbConfig.port || 3306,
+  });
 };
 
 module.exports = { getDBConnection };
