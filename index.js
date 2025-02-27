@@ -31,14 +31,30 @@ const addCorsHeaders = (response) => {
 
 exports.handler = async (event) => {
   try {
+    console.log("Lambda invoked with event:", JSON.stringify(event));
     const { httpMethod, path } = event;
-    const db = await getDBConnection();
 
     // Handle CORS preflight requests
     if (httpMethod === 'OPTIONS') {
       return addCorsHeaders({
         statusCode: 200,
         body: JSON.stringify({ message: 'CORS preflight response' }),
+      });
+    }
+
+    console.log("Connecting to database...");
+    let db;
+    try {
+      db = await getDBConnection();
+    } catch (dbError) {
+      console.error("Database connection error:", dbError);
+      return addCorsHeaders({
+        statusCode: 500,
+        body: JSON.stringify({ 
+          error: "Database connection failed", 
+          details: dbError.message,
+          code: dbError.code || "UNKNOWN"
+        }),
       });
     }
 
