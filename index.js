@@ -48,6 +48,19 @@ exports.handler = async (event) => {
       db = await getDBConnection();
     } catch (dbError) {
       console.error("Database connection error:", dbError);
+      
+      // Check if this is a missing environment variable error
+      if (dbError.message && dbError.message.includes("Missing required environment variables")) {
+        return addCorsHeaders({
+          statusCode: 500,
+          body: JSON.stringify({ 
+            error: "Lambda configuration error", 
+            details: "The Lambda function is missing required database configuration environment variables",
+            message: dbError.message
+          }),
+        });
+      }
+      
       return addCorsHeaders({
         statusCode: 500,
         body: JSON.stringify({ 
