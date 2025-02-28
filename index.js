@@ -17,14 +17,34 @@ const {
   handleDeletePost,
 } = require('./handlers');
 
-const addCorsHeaders = (response) => {
+const addCorsHeaders = (response, event) => {
+  // Get allowed origins from environment variable or use defaults
+  const allowedOrigins = process.env.ALLOWED_ORIGINS || 'http://localhost:8080,https://quantifyjiujitsu.com';
+  const originList = allowedOrigins.split(',').map(origin => origin.trim());
+  
+  // Get the origin from the request headers
+  const requestOrigin = event?.headers?.origin || event?.headers?.Origin || '';
+  
+  // Set the appropriate Access-Control-Allow-Origin header
+  let allowOrigin = originList[0]; // Default to first origin
+  
+  if (originList.includes('*')) {
+    // If wildcard is allowed, use that
+    allowOrigin = '*';
+  } else if (requestOrigin && originList.includes(requestOrigin)) {
+    // If the request origin is in the allowed list, use it
+    allowOrigin = requestOrigin;
+  }
+  
   return {
     ...response,
     headers: {
       ...response.headers,
-      'Access-Control-Allow-Origin': 'http://localhost:8080',
+      'Access-Control-Allow-Origin': allowOrigin,
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+      'Access-Control-Allow-Credentials': 'true',
+      'Access-Control-Max-Age': '86400',
     },
   };
 };
@@ -39,7 +59,7 @@ exports.handler = async (event) => {
       return addCorsHeaders({
         statusCode: 200,
         body: JSON.stringify({ message: 'CORS preflight response' }),
-      });
+      }, event);
     }
 
     console.log("Connecting to database...");
@@ -58,7 +78,7 @@ exports.handler = async (event) => {
             details: "The Lambda function is missing required database configuration environment variables",
             message: dbError.message
           }),
-        });
+        }, event);
       }
       
       return addCorsHeaders({
@@ -68,7 +88,7 @@ exports.handler = async (event) => {
           details: dbError.message,
           code: dbError.code || "UNKNOWN"
         }),
-      });
+      }, event);
     }
 
     let response;
@@ -93,11 +113,11 @@ exports.handler = async (event) => {
       else response = { statusCode: 404, body: JSON.stringify({ error: 'Route not found' }) };
     }
 
-    return addCorsHeaders(response);
+    return addCorsHeaders(response, event);
   } catch (error) {
     return addCorsHeaders({
       statusCode: 500,
       body: JSON.stringify({ error: error.message }),
-    });
+    }, event);
   }
 };

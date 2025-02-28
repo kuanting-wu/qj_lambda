@@ -387,7 +387,19 @@ const handleProxyImage = async (event) => {
 };
 
 const handleRefreshToken = async (event, db) => {
-    const refreshToken = event.body?.refreshToken; // Access refresh token from body
+    // Parse request body
+    let requestBody;
+    try {
+        requestBody = JSON.parse(event.body);
+    } catch (error) {
+        console.error("Error parsing request body:", error);
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: "Invalid request body format" }),
+        };
+    }
+
+    const refreshToken = requestBody?.refreshToken;
 
     if (!refreshToken) {
         return {
@@ -396,22 +408,40 @@ const handleRefreshToken = async (event, db) => {
         };
     }
 
+    // Verify JWT_REFRESH_SECRET environment variable is set
+    if (!process.env.JWT_REFRESH_SECRET) {
+        console.error("JWT_REFRESH_SECRET environment variable is not set");
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: "Server configuration error" }),
+        };
+    }
+
     try {
         // Verify the refresh token
         const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
         // Generate a new access token using the data from the refresh token
-        const newAccessToken = generateAccessToken({ user_name: decoded.user_name, email: decoded.email });
+        const newAccessToken = generateAccessToken({ 
+            user_name: decoded.user_name, 
+            email: decoded.email 
+        });
 
         return {
             statusCode: 200,
-            body: JSON.stringify({ accessToken: newAccessToken }),
+            body: JSON.stringify({ 
+                accessToken: newAccessToken,
+                message: "Token refreshed successfully" 
+            }),
         };
     } catch (error) {
         console.error("Invalid or expired refresh token:", error);
         return {
             statusCode: 403,
-            body: JSON.stringify({ error: "Invalid or expired refresh token" }),
+            body: JSON.stringify({ 
+                error: "Invalid or expired refresh token",
+                details: error.message 
+            }),
         };
     }
 };
