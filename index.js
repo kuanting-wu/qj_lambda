@@ -17,49 +17,17 @@ const {
   handleDeletePost,
 } = require('./handlers');
 
-const addCorsHeaders = (response, event) => {
-  // Get allowed origins from environment variable or use defaults
-  const allowedOrigins = process.env.ALLOWED_ORIGINS || 'http://localhost:8080,https://quantifyjiujitsu.com';
-  const originList = allowedOrigins.split(',').map(origin => origin.trim());
-  
-  // Get the origin from the request headers
-  const requestOrigin = event?.headers?.origin || event?.headers?.Origin || '';
-  
-  // Set the appropriate Access-Control-Allow-Origin header
-  let allowOrigin = originList[0]; // Default to first origin
-  
-  if (originList.includes('*')) {
-    // If wildcard is allowed, use that
-    allowOrigin = '*';
-  } else if (requestOrigin && originList.includes(requestOrigin)) {
-    // If the request origin is in the allowed list, use it
-    allowOrigin = requestOrigin;
-  }
-  
-  return {
-    ...response,
-    headers: {
-      ...response.headers,
-      'Access-Control-Allow-Origin': allowOrigin,
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-      'Access-Control-Allow-Credentials': 'true',
-      'Access-Control-Max-Age': '86400',
-    },
-  };
-};
-
 exports.handler = async (event) => {
   try {
     console.log("Lambda invoked with event:", JSON.stringify(event));
     const { httpMethod, path } = event;
 
-    // Handle CORS preflight requests
+    // Handle CORS preflight requests - now handled by API Gateway
     if (httpMethod === 'OPTIONS') {
-      return addCorsHeaders({
+      return {
         statusCode: 200,
-        body: JSON.stringify({ message: 'CORS preflight response' }),
-      }, event);
+        body: JSON.stringify({ message: 'CORS preflight response' })
+      };
     }
 
     console.log("Connecting to database...");
@@ -71,24 +39,24 @@ exports.handler = async (event) => {
       
       // Check if this is a missing environment variable error
       if (dbError.message && dbError.message.includes("Missing required environment variables")) {
-        return addCorsHeaders({
+        return {
           statusCode: 500,
           body: JSON.stringify({ 
             error: "Lambda configuration error", 
             details: "The Lambda function is missing required database configuration environment variables",
             message: dbError.message
-          }),
-        }, event);
+          })
+        };
       }
       
-      return addCorsHeaders({
+      return {
         statusCode: 500,
         body: JSON.stringify({ 
           error: "Database connection failed", 
           details: dbError.message,
           code: dbError.code || "UNKNOWN"
-        }),
-      }, event);
+        })
+      };
     }
 
     let response;
@@ -113,11 +81,12 @@ exports.handler = async (event) => {
       else response = { statusCode: 404, body: JSON.stringify({ error: 'Route not found' }) };
     }
 
-    return addCorsHeaders(response, event);
+    return response;
   } catch (error) {
-    return addCorsHeaders({
+    console.error("Lambda error:", error);
+    return {
       statusCode: 500,
-      body: JSON.stringify({ error: error.message }),
-    }, event);
+      body: JSON.stringify({ error: error.message })
+    };
   }
 };
