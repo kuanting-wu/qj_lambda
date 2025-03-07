@@ -7,20 +7,22 @@ const { verifyGoogleToken } = require('./google-auth');
 
 // Handle Signup
 const handleSignup = async (event, db) => {
-    const { username, email, password } = JSON.parse(event.body);
+    const { name, email, password } = JSON.parse(event.body);
+    const username = name; // In the frontend, the username field is called 'name'
+    
     if (!username || !email || !password) {
         return { statusCode: 400, body: JSON.stringify({ error: 'Username, email, and password are required' }) };
     }
 
     try {
-        // Check if email already exists
-        const [existingUsers] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
+        // Check if email already exists - PostgreSQL uses $1, $2 etc. for parameters
+        const [existingUsers] = await db.execute('SELECT * FROM users WHERE email = $1', [email]);
         if (existingUsers.length > 0) {
             return { statusCode: 400, body: JSON.stringify({ error: 'Email is already in use' }) };
         }
 
         // Check if username already exists
-        const [existingProfiles] = await db.execute('SELECT * FROM profiles WHERE username = ?', [username]);
+        const [existingProfiles] = await db.execute('SELECT * FROM profiles WHERE username = $1', [username]);
         if (existingProfiles.length > 0) {
             return { statusCode: 400, body: JSON.stringify({ error: 'Username is already in use' }) };
         }
@@ -34,20 +36,20 @@ const handleSignup = async (event, db) => {
         // Start transaction
         await db.beginTransaction();
 
-        // Insert user record
+        // Insert user record - use RETURNING in PostgreSQL to get the inserted ID
         const [userResult] = await db.execute(
-            'INSERT INTO users (email, hashed_password, verification_token, verification_token_expiry, email_verified) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO users (email, hashed_password, verification_token, verification_token_expiry, email_verified) VALUES ($1, $2, $3, $4, $5) RETURNING id',
             [email, hashedPassword, verificationToken, tokenExpiryUTC, false]
         );
         
-        const userId = userResult.insertId;
+        const userId = userResult[0].id;
         
         // Set default avatar URL
         const defaultAvatar = 'https://cdn.builder.io/api/v1/image/assets/TEMP/64c9bda73ca89162bc806ea1e084a3cd2dccf15193fe0e3c0e8008a485352e26?placeholderIfAbsent=true&apiKey=ee54480c62b34c3d9ff7ccdcccbf22d1';
         
-        // Insert profile record with minimal information
+        // Insert profile record with minimal information - PostgreSQL uses $1, $2 etc. for parameters
         await db.execute(
-            'INSERT INTO profiles (user_id, username, avatar_url) VALUES (?, ?, ?)',
+            'INSERT INTO profiles (user_id, username, avatar_url) VALUES ($1, $2, $3)',
             [userId, username, defaultAvatar]
         );
         
@@ -74,8 +76,8 @@ const handleSignin = async (event, db) => {
     const { email, password } = JSON.parse(event.body);
 
     try {
-        // Query the database to find the user by email
-        const [users] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
+        // Query the database to find the user by email - PostgreSQL uses $1, $2 etc. for parameters
+        const [users] = await db.execute('SELECT * FROM users WHERE email = $1', [email]);
 
         // If no user is found or the password doesn't match, return an error
         if (users.length === 0 || !await bcrypt.compare(password, users[0].hashed_password)) {
@@ -90,7 +92,7 @@ const handleSignin = async (event, db) => {
         const user = users[0];
 
         // Get just the username for the token
-        const [profileResult] = await db.execute('SELECT username FROM profiles WHERE user_id = ?', [user.id]);
+        const [profileResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [user.id]);
         const username = profileResult.length > 0 ? profileResult[0].username : '';
 
         // Generate access token using user data
@@ -138,7 +140,7 @@ const handleVerifyEmail = async (event, db) => {
     try {
         // Query the database to check if the token is valid and not expired
         const [users] = await db.execute(
-            'SELECT id FROM users WHERE verification_token = ? AND verification_token_expiry > NOW()',
+            'SELECT id FROM users WHERE verification_token = $1 AND verification_token_expiry > NOW()',
             [token]
         );
 
@@ -149,7 +151,7 @@ const handleVerifyEmail = async (event, db) => {
 
         // Update the user's email verification status
         await db.execute(
-            'UPDATE users SET email_verified = TRUE, verification_token = NULL, verification_token_expiry = NULL WHERE id = ?',
+            'UPDATE users SET email_verified = TRUE, verification_token = NULL, verification_token_expiry = NULL WHERE id = $1',
             [users[0].id]
         );
 
@@ -539,7 +541,7 @@ const handleGoogleSignin = async (event, db) => {
         
         // Check if user already exists with this Google ID or email
         const [existingUsers] = await db.execute(
-            'SELECT * FROM users WHERE google_id = ? OR email = ?', 
+            'SELECT * FROM users WHERE google_id = $1 OR email = $2', 
             [googleId, email]
         );
         
@@ -554,13 +556,13 @@ const handleGoogleSignin = async (event, db) => {
             
             // Update Google information
             await db.execute(
-                'UPDATE users SET google_id = ?, email_verified = ? WHERE id = ?',
+                'UPDATE users SET google_id = $1, email_verified = $2 WHERE id = $3',
                 [googleId, emailVerified, userId]
             );
             
             // Check if user has a profile with username
             const [profileResult] = await db.execute(
-                'SELECT username FROM profiles WHERE user_id = ?', 
+                'SELECT username FROM profiles WHERE user_id = $1', 
                 [userId]
             );
             
@@ -572,11 +574,11 @@ const handleGoogleSignin = async (event, db) => {
         } else {
             // New user - create user record
             const [insertResult] = await db.execute(
-                'INSERT INTO users (email, google_id, email_verified) VALUES (?, ?, ?)',
+                'INSERT INTO users (email, google_id, email_verified) VALUES ($1, $2, $3) RETURNING id',
                 [email, googleId, emailVerified]
             );
             
-            userId = insertResult.insertId;
+            userId = insertResult[0].id;
             requiresUsername = true;
         }
         
@@ -601,7 +603,7 @@ const handleGoogleSignin = async (event, db) => {
             
             // Verify username doesn't already exist
             const [usernameCheck] = await db.execute(
-                'SELECT username FROM profiles WHERE username = ?',
+                'SELECT username FROM profiles WHERE username = $1',
                 [username]
             );
             
@@ -622,7 +624,7 @@ const handleGoogleSignin = async (event, db) => {
             const defaultAvatar = picture || 'https://cdn.builder.io/api/v1/image/assets/TEMP/64c9bda73ca89162bc806ea1e084a3cd2dccf15193fe0e3c0e8008a485352e26?placeholderIfAbsent=true&apiKey=ee54480c62b34c3d9ff7ccdcccbf22d1';
             
             await db.execute(
-                'INSERT INTO profiles (user_id, username, avatar_url) VALUES (?, ?, ?)',
+                'INSERT INTO profiles (user_id, username, avatar_url) VALUES ($1, $2, $3)',
                 [userId, username, defaultAvatar]
             );
             
