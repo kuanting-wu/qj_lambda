@@ -34,8 +34,8 @@ const getDBConfig = async () => {
 const getDBConnection = async () => {
   if (cachedPool) return cachedPool; 
 
-  const dbConfig = await getDBConfig();
   try {
+    const dbConfig = await getDBConfig();
     console.log(`Attempting to connect to PostgreSQL database at ${dbConfig.host}:${dbConfig.port}`);
     
     // Create a new pool
@@ -53,38 +53,91 @@ const getDBConnection = async () => {
       max: 5
     });
     
-    // Test the connection
-    const client = await cachedPool.connect();
-    client.release();
+    // Test the connection with a timeout
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Connection timeout - could not connect to database')), 4000);
+    });
+    
+    const connectionPromise = async () => {
+      const client = await cachedPool.connect();
+      client.release();
+      return true;
+    };
+    
+    await Promise.race([connectionPromise(), timeoutPromise]);
     
     console.log("Database connected successfully");
     
     // Add execute method to match MySQL interface so we don't have to change handler code
     cachedPool.execute = async (text, params) => {
-      const result = await cachedPool.query(text, params);
-      return [result.rows, result.fields];
+      try {
+        const result = await cachedPool.query(text, params);
+        return [result.rows, result.fields];
+      } catch (error) {
+        console.error('SQL Query error:', error.message);
+        console.error('Query:', text);
+        console.error('Params:', params);
+        throw error;
+      }
     };
     
     // Add transaction methods to match MySQL interface
     cachedPool.beginTransaction = async () => {
-      const client = await cachedPool.connect();
-      cachedPool.client = client;
-      await client.query('BEGIN');
+      try {
+        const client = await cachedPool.connect();
+        cachedPool.client = client;
+        await client.query('BEGIN');
+      } catch (error) {
+        console.error('Error beginning transaction:', error.message);
+        throw error;
+      }
     };
     
     cachedPool.commit = async () => {
-      if (cachedPool.client) {
+      if (!cachedPool.client) {
+        console.warn('Attempted to commit without an active transaction');
+        return;
+      }
+      
+      try {
         await cachedPool.client.query('COMMIT');
         cachedPool.client.release();
         cachedPool.client = null;
+      } catch (error) {
+        console.error('Error committing transaction:', error.message);
+        if (cachedPool.client) {
+          try {
+            cachedPool.client.release();
+          } catch (releaseError) {
+            console.error('Error releasing client after commit error:', releaseError.message);
+          }
+          cachedPool.client = null;
+        }
+        throw error;
       }
     };
     
     cachedPool.rollback = async () => {
-      if (cachedPool.client) {
+      if (!cachedPool.client) {
+        console.warn('Attempted to rollback without an active transaction');
+        return;
+      }
+      
+      try {
         await cachedPool.client.query('ROLLBACK');
         cachedPool.client.release();
         cachedPool.client = null;
+      } catch (error) {
+        console.error('Error rolling back transaction:', error.message);
+        if (cachedPool.client) {
+          try {
+            cachedPool.client.release();
+          } catch (releaseError) {
+            console.error('Error releasing client after rollback error:', releaseError.message);
+          }
+          cachedPool.client = null;
+        }
+        throw error;
       }
     };
     
@@ -99,13 +152,21 @@ const getDBConnection = async () => {
     
     return cachedPool;
   } catch (error) {
-    console.error("Error connecting to PostgreSQL database:", error.message);
-    console.error("Database connection details:", {
-      host: dbConfig.host,
-      user: dbConfig.user,
-      database: dbConfig.database,
-      port: dbConfig.port
-    });
+    console.error("Error in getDBConnection:", error.message);
+    if (error.stack) console.error("Stack trace:", error.stack);
+    
+    // Create minimal failsafe implementation to prevent crashes
+    if (!cachedPool) {
+      console.log("Creating failsafe DB object to prevent crashes");
+      cachedPool = {
+        execute: async () => [[], []],
+        beginTransaction: async () => {},
+        commit: async () => {},
+        rollback: async () => {},
+        connection: { inTransaction: false }
+      };
+    }
+    
     throw error;
   }
 };

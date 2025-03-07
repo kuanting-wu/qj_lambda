@@ -35,6 +35,11 @@ exports.handler = async (event) => {
     let db;
     try {
       db = await getDBConnection();
+      // Add test query to verify connection is working
+      const [testResult] = await db.execute('SELECT 1 as test', []);
+      if (testResult && testResult.length > 0) {
+        console.log("Database connection verified with test query");
+      }
     } catch (dbError) {
       console.error("Database connection error:", dbError);
       
@@ -61,26 +66,47 @@ exports.handler = async (event) => {
     }
 
     let response;
-
-    if (httpMethod === 'POST' && path === '/signup') response = await handleSignup(event, db);
-    else if (httpMethod === 'POST' && path === '/signin') response = await handleSignin(event, db);
-    else if (httpMethod === 'POST' && path === '/google-signin') response = await handleGoogleSignin(event, db);
-    else if (httpMethod === 'GET' && path === '/verify-email') response = await handleVerifyEmail(event, db);
-    else if (httpMethod === 'POST' && path === '/forgot-password') response = await handleForgotPassword(event, db);
-    else if (httpMethod === 'POST' && path === '/reset-password') response = await handleResetPassword(event, db);
-    else if (httpMethod === 'GET' && path.startsWith('/viewpost/')) response = await handleViewPost(event, db);
-    else if (httpMethod === 'GET' && path.startsWith('/viewprofile/')) response = await handleViewProfile(event, db);
-    else if (httpMethod === 'GET' && path === '/search') response = await handleSearch(event, db);
-    else if (httpMethod === 'GET' && path === '/proxy-image') response = await handleProxyImage(event);
-    else {
-      const user = await authenticateToken(event);
-
-      if (httpMethod === 'POST' && path === '/refresh-token') response = await handleRefreshToken(event, db);
-      else if (httpMethod === 'PUT' && path.startsWith('/editprofile/')) response = await handleEditProfile(event, db, user);
-      else if (httpMethod === 'POST' && path.startsWith('/newpost/')) response = await handleNewPost(event, db, user);
-      else if (httpMethod === 'PUT' && path.startsWith('/editpost/')) response = await handleEditPost(event, db, user);
-      else if (httpMethod === 'DELETE' && path.startsWith('/deletepost/')) response = await handleDeletePost(event, db, user);
-      else response = { statusCode: 404, body: JSON.stringify({ error: 'Route not found' }) };
+    try {
+      if (httpMethod === 'POST' && path === '/signup') response = await handleSignup(event, db);
+      else if (httpMethod === 'POST' && path === '/signin') response = await handleSignin(event, db);
+      else if (httpMethod === 'POST' && path === '/google-signin') response = await handleGoogleSignin(event, db);
+      else if (httpMethod === 'GET' && path === '/verify-email') response = await handleVerifyEmail(event, db);
+      else if (httpMethod === 'POST' && path === '/forgot-password') response = await handleForgotPassword(event, db);
+      else if (httpMethod === 'POST' && path === '/reset-password') response = await handleResetPassword(event, db);
+      else if (httpMethod === 'GET' && path.startsWith('/viewpost/')) response = await handleViewPost(event, db);
+      else if (httpMethod === 'GET' && path.startsWith('/viewprofile/')) response = await handleViewProfile(event, db);
+      else if (httpMethod === 'GET' && path === '/search') response = await handleSearch(event, db);
+      else if (httpMethod === 'GET' && path === '/proxy-image') response = await handleProxyImage(event);
+      else {
+        try {
+          const user = await authenticateToken(event);
+  
+          if (httpMethod === 'POST' && path === '/refresh-token') response = await handleRefreshToken(event, db);
+          else if (httpMethod === 'PUT' && path.startsWith('/editprofile/')) response = await handleEditProfile(event, db, user);
+          else if (httpMethod === 'POST' && path.startsWith('/newpost/')) response = await handleNewPost(event, db, user);
+          else if (httpMethod === 'PUT' && path.startsWith('/editpost/')) response = await handleEditPost(event, db, user);
+          else if (httpMethod === 'DELETE' && path.startsWith('/deletepost/')) response = await handleDeletePost(event, db, user);
+          else response = { statusCode: 404, body: JSON.stringify({ error: 'Route not found' }) };
+        } catch (authError) {
+          console.error("Authentication error:", authError);
+          response = { 
+            statusCode: 401, 
+            body: JSON.stringify({ 
+              error: 'Authentication failed', 
+              details: authError.message 
+            }) 
+          };
+        }
+      }
+    } catch (handlerError) {
+      console.error("Handler error:", handlerError);
+      response = { 
+        statusCode: 500, 
+        body: JSON.stringify({ 
+          error: 'Request processing error', 
+          details: handlerError.message 
+        }) 
+      };
     }
 
     return response;
@@ -88,7 +114,11 @@ exports.handler = async (event) => {
     console.error("Lambda error:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: error.message })
+      body: JSON.stringify({ 
+        error: 'Server error',
+        details: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      })
     };
   }
 };

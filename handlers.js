@@ -62,10 +62,15 @@ const handleSignup = async (event, db) => {
 
         return { statusCode: 201, body: JSON.stringify({ message: 'User registered successfully! Check your email.' }) };
     } catch (error) {
-        // Rollback transaction on error
-        if (db.connection.inTransaction) {
-            await db.rollback();
+        // Rollback transaction on error if it exists
+        try {
+            if (db && typeof db.rollback === 'function') {
+                await db.rollback();
+            }
+        } catch (rollbackError) {
+            console.error('Rollback error:', rollbackError);
         }
+        
         console.error('Signup error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to register user' }) };
     }
@@ -586,7 +591,11 @@ const handleGoogleSignin = async (event, db) => {
         if (requiresUsername) {
             if (!username) {
                 // No username provided, but we need one
-                await db.rollback();
+                try {
+                    await db.rollback();
+                } catch (rollbackError) {
+                    console.error('Rollback error:', rollbackError);
+                }
                 
                 return {
                     statusCode: 428, // Precondition Required
@@ -608,7 +617,11 @@ const handleGoogleSignin = async (event, db) => {
             );
             
             if (usernameCheck.length > 0) {
-                await db.rollback();
+                try {
+                    await db.rollback();
+                } catch (rollbackError) {
+                    console.error('Rollback error:', rollbackError);
+                }
                 
                 return {
                     statusCode: 409, // Conflict
@@ -659,8 +672,12 @@ const handleGoogleSignin = async (event, db) => {
         
     } catch (error) {
         // Rollback transaction if active
-        if (db.connection && db.connection.inTransaction) {
-            await db.rollback();
+        try {
+            if (db && typeof db.rollback === 'function') {
+                await db.rollback();
+            }
+        } catch (rollbackError) {
+            console.error('Rollback error:', rollbackError);
         }
         
         console.error('Google sign-in error:', error);
