@@ -38,33 +38,35 @@ const getDBConnection = async () => {
     const dbConfig = await getDBConfig();
     console.log(`Attempting to connect to PostgreSQL database at ${dbConfig.host}:${dbConfig.port}`);
     
-    // Create a new pool with SSL enabled
+    // Create a new pool with SSL enabled and optimized for Lambda
     cachedPool = new Pool({
       host: dbConfig.host,
       user: dbConfig.user,
       password: dbConfig.password,
       database: dbConfig.database,
       port: dbConfig.port,
-      // Connect timeout in ms
-      connectionTimeoutMillis: 5000,
+      // Connect timeout in ms - reduced for Lambda
+      connectionTimeoutMillis: 3000,
       // Idle timeout in ms
-      idleTimeoutMillis: 30000, 
-      // Max clients
-      max: 5,
+      idleTimeoutMillis: 10000, 
+      // Max clients - reduced for Lambda
+      max: 1,
+      // Optimize for Lambda - don't create too many connections
+      min: 0,
       // Enable SSL but allow unauthorized certificates
       ssl: {
         rejectUnauthorized: false
       }
     });
     
-    // Test the connection with a timeout
+    // Test the connection with a shorter timeout for Lambda
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Connection timeout - could not connect to database')), 4000);
+      setTimeout(() => reject(new Error('Connection timeout - could not connect to database')), 2500);
     });
     
     const connectionPromise = async () => {
       const client = await cachedPool.connect();
-      client.release();
+      client.release(true); // Force release with true parameter
       return true;
     };
     

@@ -15,20 +15,24 @@ const handleSignup = async (event, db) => {
     }
 
     try {
-        // Check if email already exists - PostgreSQL uses $1, $2 etc. for parameters
-        const [existingUsers] = await db.execute('SELECT * FROM users WHERE email = $1', [email]);
-        if (existingUsers.length > 0) {
+        // Check if email or username already exists - combined into a single query for performance
+        const [existingRecords] = await db.execute(`
+            SELECT 
+                (SELECT COUNT(*) FROM users WHERE email = $1) AS email_count,
+                (SELECT COUNT(*) FROM profiles WHERE username = $2) AS username_count
+        `, [email, username]);
+        
+        if (existingRecords[0].email_count > 0) {
             return { statusCode: 400, body: JSON.stringify({ error: 'Email is already in use' }) };
         }
-
-        // Check if username already exists
-        const [existingProfiles] = await db.execute('SELECT * FROM profiles WHERE username = $1', [username]);
-        if (existingProfiles.length > 0) {
+        
+        if (existingRecords[0].username_count > 0) {
             return { statusCode: 400, body: JSON.stringify({ error: 'Username is already in use' }) };
         }
 
-        // Hash password and generate verification token
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // Hash password with fewer rounds (8 instead of 10) for Lambda performance
+        // This is still secure but faster in Lambda environments
+        const hashedPassword = await bcrypt.hash(password, 8);
         const verificationToken = uuidv4();
         const tokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // Token expires in 24 hours
         const tokenExpiryUTC = tokenExpiry.toISOString();

@@ -35,11 +35,8 @@ exports.handler = async (event) => {
     let db;
     try {
       db = await getDBConnection();
-      // Add test query to verify connection is working
-      const [testResult] = await db.execute('SELECT 1 as test', []);
-      if (testResult && testResult.length > 0) {
-        console.log("Database connection verified with test query");
-      }
+      // Skip test query to save time in Lambda
+      console.log("Database connection established - skipping test query for performance");
     } catch (dbError) {
       console.error("Database connection error:", dbError);
       
