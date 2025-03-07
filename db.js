@@ -38,7 +38,7 @@ const getDBConnection = async () => {
     const dbConfig = await getDBConfig();
     console.log(`Attempting to connect to PostgreSQL database at ${dbConfig.host}:${dbConfig.port}`);
     
-    // Create a new pool
+    // Create a new pool with SSL enabled
     cachedPool = new Pool({
       host: dbConfig.host,
       user: dbConfig.user,
@@ -50,7 +50,11 @@ const getDBConnection = async () => {
       // Idle timeout in ms
       idleTimeoutMillis: 30000, 
       // Max clients
-      max: 5
+      max: 5,
+      // Enable SSL but allow unauthorized certificates
+      ssl: {
+        rejectUnauthorized: false
+      }
     });
     
     // Test the connection with a timeout
