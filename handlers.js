@@ -3,65 +3,127 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { generateAccessToken, generateRefreshToken } = require('./auth');
 const { sendEmail } = require('./email');
+const { verifyGoogleToken } = require('./google-auth');
 
 // Handle Signup
 const handleSignup = async (event, db) => {
-    const { name, email, password } = JSON.parse(event.body);
-    if (!name || !email || !password) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Name, email, and password are required' }) };
+    const { username, email, password } = JSON.parse(event.body);
+    if (!username || !email || !password) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Username, email, and password are required' }) };
     }
 
-    const [users] = await db.execute('SELECT * FROM users WHERE name = ?', [name]);
-    if (users.length > 0) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Name is already in use' }) };
+    try {
+        // Check if email already exists
+        const [existingUsers] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
+        if (existingUsers.length > 0) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'Email is already in use' }) };
+        }
+
+        // Check if username already exists
+        const [existingProfiles] = await db.execute('SELECT * FROM profiles WHERE username = ?', [username]);
+        if (existingProfiles.length > 0) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'Username is already in use' }) };
+        }
+
+        // Hash password and generate verification token
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const verificationToken = uuidv4();
+        const tokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // Token expires in 24 hours
+        const tokenExpiryUTC = tokenExpiry.toISOString();
+
+        // Start transaction
+        await db.beginTransaction();
+
+        // Insert user record
+        const [userResult] = await db.execute(
+            'INSERT INTO users (email, hashed_password, verification_token, verification_token_expiry, email_verified) VALUES (?, ?, ?, ?, ?)',
+            [email, hashedPassword, verificationToken, tokenExpiryUTC, false]
+        );
+        
+        const userId = userResult.insertId;
+        
+        // Set default avatar URL
+        const defaultAvatar = 'https://cdn.builder.io/api/v1/image/assets/TEMP/64c9bda73ca89162bc806ea1e084a3cd2dccf15193fe0e3c0e8008a485352e26?placeholderIfAbsent=true&apiKey=ee54480c62b34c3d9ff7ccdcccbf22d1';
+        
+        // Insert profile record with minimal information
+        await db.execute(
+            'INSERT INTO profiles (user_id, username, avatar_url) VALUES (?, ?, ?)',
+            [userId, username, defaultAvatar]
+        );
+        
+        // Commit transaction
+        await db.commit();
+
+        // Send verification email
+        const verificationLink = `https://quantifyjiujitsu.com/verify-email?token=${verificationToken}`;
+        await sendEmail(email, 'Verify your email', `<p>Hi ${username},</p><p>Click <a href="${verificationLink}">here</a> to verify your email.</p>`);
+
+        return { statusCode: 201, body: JSON.stringify({ message: 'User registered successfully! Check your email.' }) };
+    } catch (error) {
+        // Rollback transaction on error
+        if (db.connection.inTransaction) {
+            await db.rollback();
+        }
+        console.error('Signup error:', error);
+        return { statusCode: 500, body: JSON.stringify({ error: 'Failed to register user' }) };
     }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const verificationToken = uuidv4();
-    await db.execute(
-        'INSERT INTO users (name, email, hashed_password, verification_token, email_verified) VALUES (?, ?, ?, ?, ?)',
-        [name, email, hashedPassword, verificationToken, false]
-    );
-
-    const verificationLink = `https://quantifyjiujitsu.com/verify-email?token=${verificationToken}`;
-    await sendEmail(email, 'Verify your email', `<p>Click <a href="${verificationLink}">here</a> to verify.</p>`);
-
-    return { statusCode: 201, body: JSON.stringify({ message: 'User registered successfully! Check your email.' }) };
 };
 
 // Handle Signin (Lambda version)
 const handleSignin = async (event, db) => {
     const { email, password } = JSON.parse(event.body);
 
-    // Query the database to find the user by email
-    const [users] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
+    try {
+        // Query the database to find the user by email
+        const [users] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
 
-    // If no user is found or the password doesn't match, return an error
-    if (users.length === 0 || !await bcrypt.compare(password, users[0].hashed_password)) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Invalid email or password' }) };
+        // If no user is found or the password doesn't match, return an error
+        if (users.length === 0 || !await bcrypt.compare(password, users[0].hashed_password)) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'Invalid email or password' }) };
+        }
+
+        // Check if the email is verified
+        if (!users[0].email_verified) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'Please verify your email first' }) };
+        }
+
+        const user = users[0];
+
+        // Get just the username for the token
+        const [profileResult] = await db.execute('SELECT username FROM profiles WHERE user_id = ?', [user.id]);
+        const username = profileResult.length > 0 ? profileResult[0].username : '';
+
+        // Generate access token using user data
+        const accessToken = generateAccessToken({ 
+            user_id: user.id, 
+            username: username, 
+            email: user.email 
+        });
+
+        // Generate refresh token using user data
+        const refreshToken = generateRefreshToken({ 
+            user_id: user.id, 
+            username: username, 
+            email: user.email 
+        });
+
+        // Return response with the generated tokens
+        return {
+            statusCode: 200,
+            body: JSON.stringify({
+                accessToken,
+                refreshToken,
+                email_verified: user.email_verified,
+                message: 'Signin successful!',
+            }),
+        };
+    } catch (error) {
+        console.error('Signin error:', error);
+        return { 
+            statusCode: 500, 
+            body: JSON.stringify({ error: 'An error occurred during sign in' }) 
+        };
     }
-
-    // Check if the email is verified
-    if (!users[0].email_verified) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Please verify your email first' }) };
-    }
-
-    // Generate access token using user data
-    const accessToken = generateAccessToken({ user_name: users[0].name, email });
-
-    // Generate refresh token using user data
-    const refreshToken = generateRefreshToken(users[0]);
-
-    // Return response with the generated tokens
-    return {
-        statusCode: 200,
-        body: JSON.stringify({
-            accessToken,
-            refreshToken,
-            email_verified: users[0].email_verified,
-            message: 'Signin successful!',
-        }),
-    };
 };
 
 // Handle Email Verification (Lambda version)
@@ -231,12 +293,12 @@ const handleViewPost = async (event, db) => {
         p.public_status,
         p.language,
         p.notes,
-        pr.user_name,
+        pr.username,
         pr.avatar_url,
-        pr.name,
-        pr.belt
+        pr.belt,
+        pr.academy
       FROM posts p
-      JOIN profiles pr ON p.owner_name = pr.user_name
+      JOIN profiles pr ON p.owner_id = pr.user_id
       WHERE p.id = ?
     `;
 
@@ -261,15 +323,15 @@ const handleViewPost = async (event, db) => {
 };
 
 const handleViewProfile = async (event, db) => {
-    const { user_name } = event.pathParameters; // Extract user_name from URL path
+    const { username } = event.pathParameters; // Extract username from URL path
 
-    if (!user_name) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'User name is required' }) };
+    if (!username) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Username is required' }) };
     }
 
     try {
-        // Query the profiles table for the specified user_name
-        const [results] = await db.execute('SELECT * FROM profiles WHERE user_name = ?', [user_name]);
+        // Query the profiles table for the specified username
+        const [results] = await db.execute('SELECT * FROM profiles WHERE username = ?', [username]);
 
         if (results.length === 0) {
             return { statusCode: 404, body: JSON.stringify({ error: 'Profile not found' }) };
@@ -297,7 +359,8 @@ const handleSearch = async (event, db) => {
     const sortOrder = sortOption === 'oldToNew' ? 'ASC' : 'DESC';
 
     // Get the current user from the event (simulating the authenticated user)
-    const currentUser = event.requestContext.authorizer ? event.requestContext.authorizer.user_name : null;
+    const currentUser = event.requestContext.authorizer ? event.requestContext.authorizer.username : null;
+    const currentUserId = event.requestContext.authorizer ? event.requestContext.authorizer.user_id : null;
 
     // SQL query with conditional logic for post visibility (public/private)
     const query = `
@@ -306,25 +369,25 @@ const handleSearch = async (event, db) => {
         p.video_id,
         p.video_platform,
         p.title,
-        pr.user_name,
-        pr.name,
+        pr.username,
         pr.belt,
+        pr.academy,
         pr.avatar_url,
         p.movement_type,
         p.created_at
       FROM posts p
-      JOIN profiles pr ON p.owner_name = pr.user_name
+      JOIN profiles pr ON p.owner_id = pr.user_id
       WHERE 1=1
         AND (LOWER(p.title) LIKE LOWER(?) OR ? = '')
-        AND (LOWER(pr.name) = LOWER(?) OR LOWER(pr.user_name) = LOWER(?) OR ? = '')
+        AND (LOWER(pr.username) = LOWER(?) OR ? = '')
         AND (LOWER(p.movement_type) LIKE LOWER(?) OR ? = '')
         AND (LOWER(p.starting_position) LIKE LOWER(?) OR ? = '')
         AND (LOWER(p.ending_position) LIKE LOWER(?) OR ? = '')
         AND (LOWER(p.language) LIKE LOWER(?) OR ? = '')
         AND (
-          (? = '' AND (LOWER(p.public_status) = 'public' OR (LOWER(p.public_status) = 'private' AND pr.user_name = ?)))
+          (? = '' AND (LOWER(p.public_status) = 'public' OR (LOWER(p.public_status) = 'private' AND p.owner_id = ?)))
           OR (? = 'Public' AND LOWER(p.public_status) = 'public')
-          OR (? = 'Private' AND LOWER(p.public_status) = 'private' AND pr.user_name = ?)
+          OR (? = 'Private' AND LOWER(p.public_status) = 'private' AND p.owner_id = ?)
         )
       ORDER BY p.created_at ${sortOrder}
     `;
@@ -332,14 +395,14 @@ const handleSearch = async (event, db) => {
     // Prepare query parameters
     const queryParams = [
         `%${search}%`, search,
-        postBy, postBy, postBy, // Exact match for pr.name or pr.user_name
+        postBy, postBy, // Exact match for pr.username
         `%${movementType}%`, movementType,
         `%${startingPosition}%`, startingPosition,
         `%${endingPosition}%`, endingPosition,
         `%${language}%`, language,
-        publicStatus, currentUser,  // Case 1: public or private posts if owned by currentUser
-        publicStatus,               // Case 2: public posts only
-        publicStatus, currentUser   // Case 3: private posts if owned by currentUser
+        publicStatus, currentUserId,  // Case 1: public or private posts if owned by currentUser
+        publicStatus,                 // Case 2: public posts only
+        publicStatus, currentUserId   // Case 3: private posts if owned by currentUser
     ];
 
     try {
@@ -352,9 +415,9 @@ const handleSearch = async (event, db) => {
             video_id: post.video_id,
             video_platform: post.video_platform,
             title: post.title,
-            user_name: post.user_name,
-            name: post.name,
+            username: post.username,
             belt: post.belt,
+            academy: post.academy,
             avatar_url: post.avatar_url,
             movement_type: post.movement_type,
             created_at: post.created_at,
@@ -423,7 +486,8 @@ const handleRefreshToken = async (event, db) => {
 
         // Generate a new access token using the data from the refresh token
         const newAccessToken = generateAccessToken({ 
-            user_name: decoded.user_name, 
+            user_id: decoded.user_id, 
+            username: decoded.username, 
             email: decoded.email 
         });
 
@@ -446,21 +510,181 @@ const handleRefreshToken = async (event, db) => {
     }
 };
 
-// Handle Edit Profile
-const handleEditProfile = async (event, db, user) => {
-    const { user_name } = event.pathParameters; // Extract user_name from URL path
-    const { name, belt, academy } = JSON.parse(event.body);
-
-    // Check if required fields are provided
-    if (!name || !belt || !academy) {
+// Handle Google Sign-in
+const handleGoogleSignin = async (event, db) => {
+    try {
+        const { idToken, username } = JSON.parse(event.body);
+        
+        if (!idToken) {
+            return { 
+                statusCode: 400, 
+                body: JSON.stringify({ error: 'Google ID token is required' }) 
+            };
+        }
+        
+        // Verify the Google token
+        const googleUser = await verifyGoogleToken(idToken);
+        const { googleId, email, emailVerified, picture } = googleUser;
+        
+        // Check if any validation issues
+        if (!email) {
+            return { 
+                statusCode: 400, 
+                body: JSON.stringify({ error: 'Email is required from Google authentication' }) 
+            };
+        }
+        
+        // Start database transaction
+        await db.beginTransaction();
+        
+        // Check if user already exists with this Google ID or email
+        const [existingUsers] = await db.execute(
+            'SELECT * FROM users WHERE google_id = ? OR email = ?', 
+            [googleId, email]
+        );
+        
+        let userId;
+        let requiresUsername = false;
+        let userUsername = null;
+        
+        if (existingUsers.length > 0) {
+            // Existing user - update the Google tokens
+            const user = existingUsers[0];
+            userId = user.id;
+            
+            // Update Google information
+            await db.execute(
+                'UPDATE users SET google_id = ?, email_verified = ? WHERE id = ?',
+                [googleId, emailVerified, userId]
+            );
+            
+            // Check if user has a profile with username
+            const [profileResult] = await db.execute(
+                'SELECT username FROM profiles WHERE user_id = ?', 
+                [userId]
+            );
+            
+            if (profileResult.length > 0) {
+                userUsername = profileResult[0].username;
+            } else {
+                requiresUsername = true;
+            }
+        } else {
+            // New user - create user record
+            const [insertResult] = await db.execute(
+                'INSERT INTO users (email, google_id, email_verified) VALUES (?, ?, ?)',
+                [email, googleId, emailVerified]
+            );
+            
+            userId = insertResult.insertId;
+            requiresUsername = true;
+        }
+        
+        // Handle username requirement cases
+        if (requiresUsername) {
+            if (!username) {
+                // No username provided, but we need one
+                await db.rollback();
+                
+                return {
+                    statusCode: 428, // Precondition Required
+                    body: JSON.stringify({
+                        error: 'Username required',
+                        needsUsername: true,
+                        googleId,
+                        email,
+                        emailVerified,
+                        message: 'Please choose a username to complete registration'
+                    })
+                };
+            }
+            
+            // Verify username doesn't already exist
+            const [usernameCheck] = await db.execute(
+                'SELECT username FROM profiles WHERE username = ?',
+                [username]
+            );
+            
+            if (usernameCheck.length > 0) {
+                await db.rollback();
+                
+                return {
+                    statusCode: 409, // Conflict
+                    body: JSON.stringify({
+                        error: 'Username already taken',
+                        needsUsername: true,
+                        message: 'This username is already taken. Please choose another one.'
+                    })
+                };
+            }
+            
+            // Create profile with the provided username
+            const defaultAvatar = picture || 'https://cdn.builder.io/api/v1/image/assets/TEMP/64c9bda73ca89162bc806ea1e084a3cd2dccf15193fe0e3c0e8008a485352e26?placeholderIfAbsent=true&apiKey=ee54480c62b34c3d9ff7ccdcccbf22d1';
+            
+            await db.execute(
+                'INSERT INTO profiles (user_id, username, avatar_url) VALUES (?, ?, ?)',
+                [userId, username, defaultAvatar]
+            );
+            
+            userUsername = username;
+        }
+        
+        // Generate auth tokens
+        const accessToken = generateAccessToken({
+            user_id: userId,
+            username: userUsername,
+            email
+        });
+        
+        const refreshToken = generateRefreshToken({
+            user_id: userId,
+            username: userUsername,
+            email
+        });
+        
+        // Commit the transaction
+        await db.commit();
+        
         return {
-            statusCode: 400,
-            body: JSON.stringify({ error: 'Name, belt, and academy are required' })
+            statusCode: 200,
+            body: JSON.stringify({
+                accessToken,
+                refreshToken,
+                email_verified: true,
+                message: 'Google sign-in successful'
+            })
+        };
+        
+    } catch (error) {
+        // Rollback transaction if active
+        if (db.connection && db.connection.inTransaction) {
+            await db.rollback();
+        }
+        
+        console.error('Google sign-in error:', error);
+        
+        if (error.message === 'Invalid Google token') {
+            return {
+                statusCode: 401,
+                body: JSON.stringify({ error: 'Invalid Google token' })
+            };
+        }
+        
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: 'An error occurred during Google sign-in' })
         };
     }
+};
+
+// Handle Edit Profile
+const handleEditProfile = async (event, db, user) => {
+    const { username } = event.pathParameters; // Extract username from URL path
+    const { belt, academy, bio, location, nationality, weight_class, height, date_of_birth, 
+            social_links, achievements, website_url, contact_email } = JSON.parse(event.body);
 
     // Check if the authenticated user is trying to edit their own profile
-    if (user.user_name !== user_name) {
+    if (user.username !== username) {
         return {
             statusCode: 403,
             body: JSON.stringify({ error: 'User not authorized to edit this profile' })
@@ -468,11 +692,87 @@ const handleEditProfile = async (event, db, user) => {
     }
 
     try {
-        // Update the user's profile in the database
-        const [results] = await db.execute(
-            'UPDATE profiles SET name = ?, belt = ?, academy = ? WHERE user_name = ?',
-            [name, belt, academy, user_name]
-        );
+        // Prepare update fields dynamically based on what's provided
+        const updates = [];
+        const params = [];
+
+        // Add all potential fields to update
+        if (belt !== undefined) { 
+            updates.push('belt = ?'); 
+            params.push(belt); 
+        }
+        
+        if (academy !== undefined) { 
+            updates.push('academy = ?'); 
+            params.push(academy); 
+        }
+        
+        if (bio !== undefined) { 
+            updates.push('bio = ?'); 
+            params.push(bio); 
+        }
+        
+        if (location !== undefined) { 
+            updates.push('location = ?'); 
+            params.push(location); 
+        }
+        
+        if (nationality !== undefined) { 
+            updates.push('nationality = ?'); 
+            params.push(nationality); 
+        }
+        
+        if (weight_class !== undefined) { 
+            updates.push('weight_class = ?'); 
+            params.push(weight_class); 
+        }
+        
+        if (height !== undefined) { 
+            updates.push('height = ?'); 
+            params.push(height); 
+        }
+        
+        if (date_of_birth !== undefined) { 
+            updates.push('date_of_birth = ?'); 
+            params.push(date_of_birth); 
+        }
+        
+        if (social_links !== undefined) { 
+            updates.push('social_links = ?'); 
+            params.push(JSON.stringify(social_links)); 
+        }
+        
+        if (achievements !== undefined) { 
+            updates.push('achievements = ?'); 
+            params.push(achievements); 
+        }
+        
+        if (website_url !== undefined) { 
+            updates.push('website_url = ?'); 
+            params.push(website_url); 
+        }
+        
+        if (contact_email !== undefined) { 
+            updates.push('contact_email = ?'); 
+            params.push(contact_email); 
+        }
+        
+        // Always add updated_at
+        updates.push('updated_at = CURRENT_TIMESTAMP');
+        
+        // If no fields to update, return
+        if (updates.length === 0) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'No fields to update' })
+            };
+        }
+
+        // Build and execute query
+        const query = `UPDATE profiles SET ${updates.join(', ')} WHERE username = ?`;
+        params.push(username);
+        
+        const [results] = await db.execute(query, params);
 
         // Check if the profile was updated
         if (results.affectedRows === 0) {
@@ -516,7 +816,7 @@ const handleNewPost = async (event, db, user) => {
           title,
           video_id,
           video_platform,
-          owner_name,
+          owner_id,
           movement_type,
           starting_position,
           ending_position,
@@ -531,7 +831,7 @@ const handleNewPost = async (event, db, user) => {
             title,
             video_id,
             video_platform,
-            user.user_name, // The authenticated user's name
+            user.user_id, // The authenticated user's ID
             movement_type,
             starting_position,
             ending_position,
@@ -571,8 +871,8 @@ const handleEditPost = async (event, db, user) => {
     }
 
     try {
-        // First, check if the post exists and get the owner's name
-        const [results] = await db.execute('SELECT owner_name FROM posts WHERE id = ?', [postId]);
+        // First, check if the post exists and get the owner's id
+        const [results] = await db.execute('SELECT owner_id FROM posts WHERE id = ?', [postId]);
 
         if (results.length === 0) {
             return {
@@ -582,8 +882,8 @@ const handleEditPost = async (event, db, user) => {
         }
 
         // Check if the authenticated user is the owner of the post
-        const postOwner = results[0].owner_name;
-        if (user.user_name !== postOwner) {
+        const postOwnerId = results[0].owner_id;
+        if (parseInt(user.user_id) !== parseInt(postOwnerId)) {
             return {
                 statusCode: 403,
                 body: JSON.stringify({ error: 'User not authorized to edit this post' })
@@ -604,7 +904,7 @@ const handleEditPost = async (event, db, user) => {
           public_status = ?,
           language = ?,
           notes = ?
-        WHERE id = ? AND owner_name = ?
+        WHERE id = ? AND owner_id = ?
       `;
 
         await db.execute(updateQuery, [
@@ -619,7 +919,7 @@ const handleEditPost = async (event, db, user) => {
             language,
             notes,
             postId,
-            user.user_name
+            user.user_id
         ]);
 
         // Return success message
@@ -642,8 +942,8 @@ const handleDeletePost = async (event, db, user) => {
     const postId = event.pathParameters.id;
 
     try {
-        // First, check if the post exists and retrieve the owner's name
-        const [results] = await db.execute('SELECT owner_name FROM posts WHERE id = ?', [postId]);
+        // First, check if the post exists and retrieve the owner's id
+        const [results] = await db.execute('SELECT owner_id FROM posts WHERE id = ?', [postId]);
 
         if (results.length === 0) {
             return {
@@ -653,8 +953,8 @@ const handleDeletePost = async (event, db, user) => {
         }
 
         // Check if the authenticated user is the owner of the post
-        const postOwner = results[0].owner_name;
-        if (user.user_name !== postOwner) {
+        const postOwnerId = results[0].owner_id;
+        if (parseInt(user.user_id) !== parseInt(postOwnerId)) {
             return {
                 statusCode: 403,
                 body: JSON.stringify({ error: 'User not authorized to delete this post' })
@@ -699,6 +999,7 @@ module.exports = {
     handleSearch,
     handleProxyImage,
     handleRefreshToken,
+    handleGoogleSignin,
     handleEditProfile,
     handleNewPost,
     handleEditPost,

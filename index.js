@@ -11,6 +11,7 @@ const {
   handleSearch,
   handleProxyImage,
   handleRefreshToken,
+  handleGoogleSignin,
   handleEditProfile,
   handleNewPost,
   handleEditPost,
@@ -63,6 +64,7 @@ exports.handler = async (event) => {
 
     if (httpMethod === 'POST' && path === '/signup') response = await handleSignup(event, db);
     else if (httpMethod === 'POST' && path === '/signin') response = await handleSignin(event, db);
+    else if (httpMethod === 'POST' && path === '/google-signin') response = await handleGoogleSignin(event, db);
     else if (httpMethod === 'GET' && path === '/verify-email') response = await handleVerifyEmail(event, db);
     else if (httpMethod === 'POST' && path === '/forgot-password') response = await handleForgotPassword(event, db);
     else if (httpMethod === 'POST' && path === '/reset-password') response = await handleResetPassword(event, db);

@@ -8,7 +8,11 @@ const generateAccessToken = (user) => {
   }
   
   return jwt.sign(
-    { user_name: user.user_name || user.name, email: user.email },
+    { 
+      user_id: user.user_id, 
+      username: user.username, 
+      email: user.email 
+    },
     process.env.JWT_SECRET,
     { expiresIn: '1h' }
   );
@@ -22,7 +26,11 @@ const generateRefreshToken = (user) => {
   }
   
   return jwt.sign(
-    { user_name: user.user_name || user.name, email: user.email },
+    { 
+      user_id: user.user_id, 
+      username: user.username, 
+      email: user.email 
+    },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: '7d' }
   );
