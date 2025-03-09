@@ -60,11 +60,30 @@ const handleSignup = async (event, db) => {
         // Commit transaction
         await db.commit();
 
-        // Send verification email
+        // Send verification email with expiration notice
         const verificationLink = `https://quantifyjiujitsu.com/verify-email?token=${verificationToken}`;
-        await sendEmail(email, 'Verify your email', `<p>Hi ${username},</p><p>Click <a href="${verificationLink}">here</a> to verify your email.</p>`);
+        const expiryDate = tokenExpiry.toLocaleString(); // Format the date for user-friendly display
+        
+        await sendEmail(
+            email, 
+            'Verify your email', 
+            `<p>Hi ${username},</p>
+            <p>Click <a href="${verificationLink}">here</a> to verify your email.</p>
+            <p>This verification link will expire in 24 hours (${expiryDate}).</p>
+            <p>If the link expires, you can request a new verification email from the sign-in page.</p>`
+        );
 
-        return { statusCode: 201, body: JSON.stringify({ message: 'User registered successfully! Check your email.' }) };
+        return { 
+            statusCode: 201, 
+            body: JSON.stringify({ 
+                message: 'User registered successfully! Check your email.',
+                email: email,
+                userId: userId,
+                requiresVerification: true, 
+                verificationSent: true,
+                verificationExpiry: tokenExpiry.toISOString()
+            }) 
+        };
     } catch (error) {
         // Rollback transaction on error if it exists
         try {
@@ -95,7 +114,21 @@ const handleSignin = async (event, db) => {
 
         // Check if the email is verified
         if (!users[0].email_verified) {
-            return { statusCode: 400, body: JSON.stringify({ error: 'Please verify your email first' }) };
+            // Get username for the error response
+            const [profileResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [users[0].id]);
+            const username = profileResult.length > 0 ? profileResult[0].username : '';
+            
+            return { 
+                statusCode: 403, // Forbidden is more appropriate here
+                body: JSON.stringify({
+                    error: 'Please verify your email first',
+                    unverified: true,
+                    email: users[0].email,
+                    userId: users[0].id,
+                    username: username,
+                    message: 'Your email address has not been verified. You can request a new verification email.'
+                })
+            };
         }
 
         const user = users[0];
@@ -147,27 +180,103 @@ const handleVerifyEmail = async (event, db) => {
     }
 
     try {
-        // Query the database to check if the token is valid and not expired
-        const [users] = await db.execute(
-            'SELECT id FROM users WHERE verification_token = $1 AND verification_token_expiry > NOW()',
+        // First, try to find the user with this token regardless of expiry
+        const [usersWithToken] = await db.execute(
+            'SELECT id, email, verification_token_expiry, email_verified FROM users WHERE verification_token = $1',
             [token]
         );
 
-        // If no user is found or the token is expired, return an error
-        if (users.length === 0) {
-            return { statusCode: 400, body: JSON.stringify({ error: 'Invalid or expired token' }) };
+        // If no user is found, the token is invalid
+        if (usersWithToken.length === 0) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'Invalid verification token' }) };
         }
 
-        // Update the user's email verification status
+        const user = usersWithToken[0];
+        
+        // If the user is already verified, return success
+        if (user.email_verified) {
+            return { statusCode: 200, body: JSON.stringify({ message: 'Email already verified!' }) };
+        }
+        
+        // Check if the token is expired
+        const now = new Date();
+        const tokenExpiry = new Date(user.verification_token_expiry);
+        
+        if (now > tokenExpiry) {
+            // Token has expired
+            return { 
+                statusCode: 410, // Gone status code for expired resource
+                body: JSON.stringify({ 
+                    error: 'Verification token has expired', 
+                    userId: user.id,
+                    email: user.email,
+                    expired: true
+                }) 
+            };
+        }
+
+        // Token is valid and not expired - update the user's email verification status
         await db.execute(
             'UPDATE users SET email_verified = TRUE, verification_token = NULL, verification_token_expiry = NULL WHERE id = $1',
-            [users[0].id]
+            [user.id]
         );
 
         // Return success response
         return { statusCode: 200, body: JSON.stringify({ message: 'Email verified successfully!' }) };
     } catch (error) {
         console.error('Error verifying email:', error);
+        return { statusCode: 500, body: JSON.stringify({ error: 'Internal server error' }) };
+    }
+};
+
+// Handle Resend Verification Email
+const handleResendVerification = async (event, db) => {
+    const { email } = JSON.parse(event.body);
+    
+    if (!email) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Email is required' }) };
+    }
+    
+    try {
+        // Check if user exists and isn't already verified
+        const [users] = await db.execute(
+            'SELECT id, username, email_verified FROM users u JOIN profiles p ON u.id = p.user_id WHERE u.email = $1',
+            [email]
+        );
+        
+        if (users.length === 0) {
+            return { statusCode: 404, body: JSON.stringify({ error: 'User not found' }) };
+        }
+        
+        const user = users[0];
+        
+        // If already verified, return success
+        if (user.email_verified) {
+            return { statusCode: 200, body: JSON.stringify({ message: 'Email already verified!' }) };
+        }
+        
+        // Generate new verification token
+        const verificationToken = uuidv4();
+        const tokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // Token expires in 24 hours
+        const tokenExpiryUTC = tokenExpiry.toISOString();
+        
+        // Update user with new token
+        await db.execute(
+            'UPDATE users SET verification_token = $1, verification_token_expiry = $2 WHERE id = $3',
+            [verificationToken, tokenExpiryUTC, user.id]
+        );
+        
+        // Send verification email
+        const verificationLink = `https://quantifyjiujitsu.com/verify-email?token=${verificationToken}`;
+        await sendEmail(
+            email, 
+            'Verify your email', 
+            `<p>Hi ${user.username},</p><p>Please click <a href="${verificationLink}">here</a> to verify your email.</p><p>This link will expire in 24 hours.</p>`
+        );
+        
+        return { statusCode: 200, body: JSON.stringify({ message: 'Verification email resent successfully!' }) };
+    } catch (error) {
+        console.error('Error resending verification email:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal server error' }) };
     }
 };
@@ -669,7 +778,10 @@ const handleGoogleSignin = async (event, db) => {
             body: JSON.stringify({
                 accessToken,
                 refreshToken,
-                email_verified: true,
+                userId: userId,
+                username: userUsername,
+                email: email,
+                email_verified: true, // Google accounts are considered verified automatically
                 message: 'Google sign-in successful'
             })
         };
@@ -1015,6 +1127,7 @@ module.exports = {
     handleSignup,
     handleSignin,
     handleVerifyEmail,
+    handleResendVerification,
     handleForgotPassword,
     handleResetPassword,
     handleViewPost,

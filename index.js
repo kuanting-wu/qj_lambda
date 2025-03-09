@@ -4,6 +4,7 @@ const {
   handleSignup,
   handleSignin,
   handleVerifyEmail,
+  handleResendVerification,
   handleForgotPassword,
   handleResetPassword,
   handleViewPost,
@@ -68,6 +69,7 @@ exports.handler = async (event) => {
       else if (httpMethod === 'POST' && path === '/signin') response = await handleSignin(event, db);
       else if (httpMethod === 'POST' && path === '/google-signin') response = await handleGoogleSignin(event, db);
       else if (httpMethod === 'GET' && path === '/verify-email') response = await handleVerifyEmail(event, db);
+      else if (httpMethod === 'POST' && path === '/resend-verification') response = await handleResendVerification(event, db);
       else if (httpMethod === 'POST' && path === '/forgot-password') response = await handleForgotPassword(event, db);
       else if (httpMethod === 'POST' && path === '/reset-password') response = await handleResetPassword(event, db);
       else if (httpMethod === 'GET' && path.startsWith('/viewpost/')) response = await handleViewPost(event, db);
