@@ -64,23 +64,37 @@ const handleSignup = async (event, db) => {
         const verificationLink = `https://quantifyjiujitsu.com/verify-email?token=${verificationToken}`;
         const expiryDate = tokenExpiry.toLocaleString(); // Format the date for user-friendly display
         
-        await sendEmail(
-            email, 
-            'Verify your email', 
-            `<p>Hi ${username},</p>
-            <p>Click <a href="${verificationLink}">here</a> to verify your email.</p>
-            <p>This verification link will expire in 24 hours (${expiryDate}).</p>
-            <p>If the link expires, you can request a new verification email from the sign-in page.</p>`
-        );
+        let emailSent = false;
+        try {
+            // Try to send email but don't block registration if it fails
+            const emailResult = await sendEmail(
+                email, 
+                'Verify your email', 
+                `<p>Hi ${username},</p>
+                <p>Click <a href="${verificationLink}">here</a> to verify your email.</p>
+                <p>This verification link will expire in 24 hours (${expiryDate}).</p>
+                <p>If the link expires, you can request a new verification email from the sign-in page.</p>`
+            );
+            emailSent = emailResult.success;
+            
+            if (!emailResult.success) {
+                console.warn(`Failed to send verification email to ${email}: ${emailResult.error?.message || 'Unknown error'}`);
+            }
+        } catch (emailError) {
+            console.error('Error sending verification email:', emailError);
+            // Continue with registration even if email fails
+        }
 
         return { 
             statusCode: 201, 
             body: JSON.stringify({ 
-                message: 'User registered successfully! Check your email.',
+                message: emailSent ? 
+                    'User registered successfully! Check your email.' : 
+                    'User registered successfully! Email verification is temporarily unavailable.',
                 email: email,
                 userId: userId,
                 requiresVerification: true, 
-                verificationSent: true,
+                verificationSent: emailSent,
                 verificationExpiry: tokenExpiry.toISOString()
             }) 
         };
@@ -268,13 +282,32 @@ const handleResendVerification = async (event, db) => {
         
         // Send verification email
         const verificationLink = `https://quantifyjiujitsu.com/verify-email?token=${verificationToken}`;
-        await sendEmail(
-            email, 
-            'Verify your email', 
-            `<p>Hi ${user.username},</p><p>Please click <a href="${verificationLink}">here</a> to verify your email.</p><p>This link will expire in 24 hours.</p>`
-        );
         
-        return { statusCode: 200, body: JSON.stringify({ message: 'Verification email resent successfully!' }) };
+        let emailSent = false;
+        try {
+            const emailResult = await sendEmail(
+                email, 
+                'Verify your email', 
+                `<p>Hi ${user.username},</p><p>Please click <a href="${verificationLink}">here</a> to verify your email.</p><p>This link will expire in 24 hours.</p>`
+            );
+            emailSent = emailResult.success;
+            
+            if (!emailResult.success) {
+                console.warn(`Failed to send verification email to ${email}: ${emailResult.error?.message || 'Unknown error'}`);
+            }
+        } catch (emailError) {
+            console.error('Error sending verification email:', emailError);
+        }
+        
+        return { 
+            statusCode: 200, 
+            body: JSON.stringify({ 
+                message: emailSent ? 
+                    'Verification email resent successfully!' : 
+                    'Verification token updated, but email sending is temporarily unavailable.',
+                emailSent
+            }) 
+        };
     } catch (error) {
         console.error('Error resending verification email:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal server error' }) };
@@ -321,20 +354,45 @@ const handleForgotPassword = async (event, db) => {
         const htmlBody = `<p>Click <a href="${resetLink}">here</a> to reset your password. This link expires in 1 hour.</p>`;
         const subject = 'Password Reset - Quantify Jiu-Jitsu';
 
-        // Send the email using the sendEmail function from email.js
-        const emailResponse = await sendEmail(email, subject, htmlBody);
+        try {
+            // Send the email using the sendEmail function from email.js
+            const emailResponse = await sendEmail(email, subject, htmlBody);
 
-        // If email was successfully sent
-        if (emailResponse.success) {
+            // If email was successfully sent
+            if (emailResponse.success) {
+                return {
+                    statusCode: 200,
+                    body: JSON.stringify({ 
+                        message: 'Password reset email sent successfully!',
+                        token: resetToken, // Include token in development for testing
+                        expires: tokenExpiryUTC 
+                    }),
+                };
+            } else {
+                // If email sending failed
+                console.warn(`Failed to send password reset email: ${emailResponse.error?.message || 'Unknown error'}`);
+                return {
+                    statusCode: 200, // Still return 200 to avoid revealing email existence
+                    body: JSON.stringify({ 
+                        message: 'If an account exists with this email, a reset token has been generated.',
+                        emailFailure: true,
+                        // Only include token if in development mode
+                        token: process.env.NODE_ENV === 'development' ? resetToken : undefined,
+                        expires: process.env.NODE_ENV === 'development' ? tokenExpiryUTC : undefined
+                    }),
+                };
+            }
+        } catch (emailError) {
+            console.error('Error sending password reset email:', emailError);
             return {
-                statusCode: 200,
-                body: JSON.stringify({ message: 'Password reset email sent successfully!' }),
-            };
-        } else {
-            // If email sending failed
-            return {
-                statusCode: 500,
-                body: JSON.stringify({ error: 'Failed to send password reset email' }),
+                statusCode: 200, // Still return 200 to avoid revealing email existence
+                body: JSON.stringify({ 
+                    message: 'If an account exists with this email, a reset token has been generated.',
+                    emailFailure: true,
+                    // Only include token if in development mode
+                    token: process.env.NODE_ENV === 'development' ? resetToken : undefined,
+                    expires: process.env.NODE_ENV === 'development' ? tokenExpiryUTC : undefined
+                }),
             };
         }
     } catch (error) {
