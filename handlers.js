@@ -37,28 +37,54 @@ const handleSignup = async (event, db) => {
         const tokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // Token expires in 24 hours
         const tokenExpiryUTC = tokenExpiry.toISOString();
 
-        // Start transaction
-        await db.beginTransaction();
-
-        // Insert user record - use RETURNING in PostgreSQL to get the inserted ID
-        const [userResult] = await db.execute(
-            'INSERT INTO users (email, hashed_password, verification_token, verification_token_expiry, email_verified) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-            [email, hashedPassword, verificationToken, tokenExpiryUTC, false]
-        );
-        
-        const userId = userResult[0].id;
-        
         // Set default avatar URL
         const defaultAvatar = 'https://cdn.builder.io/api/v1/image/assets/TEMP/64c9bda73ca89162bc806ea1e084a3cd2dccf15193fe0e3c0e8008a485352e26?placeholderIfAbsent=true&apiKey=ee54480c62b34c3d9ff7ccdcccbf22d1';
         
-        // Insert profile record with minimal information - PostgreSQL uses $1, $2 etc. for parameters
-        await db.execute(
-            'INSERT INTO profiles (user_id, username, avatar_url) VALUES ($1, $2, $3)',
-            [userId, username, defaultAvatar]
-        );
-        
-        // Commit transaction
-        await db.commit();
+        let userId;
+        // Start transaction - with retries
+        let retries = 2;
+        while (retries >= 0) {
+            try {
+                await db.beginTransaction();
+                
+                // Insert user record - use RETURNING in PostgreSQL to get the inserted ID
+                const [userResult] = await db.execute(
+                    'INSERT INTO users (email, hashed_password, verification_token, verification_token_expiry, email_verified) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+                    [email, hashedPassword, verificationToken, tokenExpiryUTC, false]
+                );
+                
+                userId = userResult[0].id;
+                
+                // Insert profile record with minimal information - PostgreSQL uses $1, $2 etc. for parameters
+                await db.execute(
+                    'INSERT INTO profiles (user_id, username, avatar_url) VALUES ($1, $2, $3)',
+                    [userId, username, defaultAvatar]
+                );
+                
+                // Commit transaction
+                await db.commit();
+                break; // Success, exit the retry loop
+            } catch (txError) {
+                console.warn(`Transaction attempt failed (${retries} retries left): ${txError.message}`);
+                
+                // Try to rollback if needed
+                try {
+                    if (db && typeof db.rollback === 'function' && db.connection.inTransaction) {
+                        await db.rollback();
+                    }
+                } catch (rollbackError) {
+                    console.error('Rollback error:', rollbackError);
+                }
+                
+                if (retries <= 0) {
+                    throw txError; // No more retries, propagate the error
+                }
+                
+                // Wait a bit before retry (exponential backoff)
+                await new Promise(resolve => setTimeout(resolve, 500 * (2 - retries)));
+                retries--;
+            }
+        }
 
         // Send verification email with expiration notice
         const verificationLink = `https://quantifyjiujitsu.com/verify-email?token=${verificationToken}`;
@@ -328,7 +354,7 @@ const handleForgotPassword = async (event, db) => {
 
     try {
         // Check if the email exists in the database
-        const [users] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
+        const [users] = await db.execute('SELECT * FROM users WHERE email = $1', [email]);
         if (users.length === 0) {
             return {
                 statusCode: 404,
@@ -343,7 +369,7 @@ const handleForgotPassword = async (event, db) => {
 
         // Update the user's reset token and expiry in the database
         await db.execute(
-            'UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE email = ?',
+            'UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE email = $3',
             [resetToken, tokenExpiryUTC, email]
         );
 
@@ -419,7 +445,7 @@ const handleResetPassword = async (event, db) => {
     try {
         // Check if the token is valid and not expired
         const [users] = await db.execute(
-            'SELECT * FROM users WHERE reset_token = ? AND reset_token_expiry > NOW()',
+            'SELECT * FROM users WHERE reset_token = $1 AND reset_token_expiry > CURRENT_TIMESTAMP',
             [token]
         );
 
@@ -435,7 +461,7 @@ const handleResetPassword = async (event, db) => {
 
         // Update the user's password and clear the reset token and expiry
         await db.execute(
-            'UPDATE users SET hashed_password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?',
+            'UPDATE users SET hashed_password = $1, reset_token = NULL, reset_token_expiry = NULL WHERE id = $2',
             [hashedPassword, users[0].id]
         );
 
@@ -477,7 +503,7 @@ const handleViewPost = async (event, db) => {
         pr.academy
       FROM posts p
       JOIN profiles pr ON p.owner_id = pr.user_id
-      WHERE p.id = ?
+      WHERE p.id = $1
     `;
 
     try {
@@ -509,7 +535,7 @@ const handleViewProfile = async (event, db) => {
 
     try {
         // Query the profiles table for the specified username
-        const [results] = await db.execute('SELECT * FROM profiles WHERE username = ?', [username]);
+        const [results] = await db.execute('SELECT * FROM profiles WHERE username = $1', [username]);
 
         if (results.length === 0) {
             return { statusCode: 404, body: JSON.stringify({ error: 'Profile not found' }) };

@@ -19,6 +19,21 @@ const {
   handleDeletePost,
 } = require('./handlers');
 
+// Set a timeout function to guard against hanging operations
+const withTimeout = (promise, timeoutMs = 10000, errorMessage = 'Operation timed out') => {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+  });
+  
+  return Promise.race([
+    promise,
+    timeoutPromise
+  ]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+};
+
 exports.handler = async (event) => {
   try {
     console.log("Lambda invoked with event:", JSON.stringify(event));
@@ -35,7 +50,13 @@ exports.handler = async (event) => {
     console.log("Connecting to database...");
     let db;
     try {
-      db = await getDBConnection();
+      // Use withTimeout to prevent DB connection from hanging
+      db = await withTimeout(
+        getDBConnection(),
+        8000, // Match our connection timeout
+        "Database connection timed out - the database might be under heavy load or unreachable"
+      );
+      
       // Skip test query to save time in Lambda
       console.log("Database connection established - skipping test query for performance");
     } catch (dbError) {
@@ -53,6 +74,18 @@ exports.handler = async (event) => {
         };
       }
       
+      // Check if this is a timeout error
+      if (dbError.message && (dbError.message.includes("timed out") || dbError.code === 'ETIMEDOUT')) {
+        return {
+          statusCode: 503, // Service Unavailable
+          body: JSON.stringify({ 
+            error: "Database service temporarily unavailable", 
+            details: "The database connection attempt timed out. Please try again later.",
+            code: dbError.code || "TIMEOUT"
+          })
+        };
+      }
+      
       return {
         statusCode: 500,
         body: JSON.stringify({ 
@@ -65,27 +98,47 @@ exports.handler = async (event) => {
 
     let response;
     try {
-      if (httpMethod === 'POST' && path === '/signup') response = await handleSignup(event, db);
-      else if (httpMethod === 'POST' && path === '/signin') response = await handleSignin(event, db);
-      else if (httpMethod === 'POST' && path === '/google-signin') response = await handleGoogleSignin(event, db);
-      else if (httpMethod === 'GET' && path === '/verify-email') response = await handleVerifyEmail(event, db);
-      else if (httpMethod === 'POST' && path === '/resend-verification') response = await handleResendVerification(event, db);
-      else if (httpMethod === 'POST' && path === '/forgot-password') response = await handleForgotPassword(event, db);
-      else if (httpMethod === 'POST' && path === '/reset-password') response = await handleResetPassword(event, db);
-      else if (httpMethod === 'GET' && path.startsWith('/viewpost/')) response = await handleViewPost(event, db);
-      else if (httpMethod === 'GET' && path.startsWith('/viewprofile/')) response = await handleViewProfile(event, db);
-      else if (httpMethod === 'GET' && path === '/search') response = await handleSearch(event, db);
-      else if (httpMethod === 'GET' && path === '/proxy-image') response = await handleProxyImage(event);
-      else {
+      // Get handler based on route
+      let handlerPromise;
+      if (httpMethod === 'POST' && path === '/signup') {
+        handlerPromise = handleSignup(event, db);
+      } else if (httpMethod === 'POST' && path === '/signin') {
+        handlerPromise = handleSignin(event, db);
+      } else if (httpMethod === 'POST' && path === '/google-signin') {
+        handlerPromise = handleGoogleSignin(event, db);
+      } else if (httpMethod === 'GET' && path === '/verify-email') {
+        handlerPromise = handleVerifyEmail(event, db);
+      } else if (httpMethod === 'POST' && path === '/resend-verification') {
+        handlerPromise = handleResendVerification(event, db);
+      } else if (httpMethod === 'POST' && path === '/forgot-password') {
+        handlerPromise = handleForgotPassword(event, db);
+      } else if (httpMethod === 'POST' && path === '/reset-password') {
+        handlerPromise = handleResetPassword(event, db);
+      } else if (httpMethod === 'GET' && path.startsWith('/viewpost/')) {
+        handlerPromise = handleViewPost(event, db);
+      } else if (httpMethod === 'GET' && path.startsWith('/viewprofile/')) {
+        handlerPromise = handleViewProfile(event, db);
+      } else if (httpMethod === 'GET' && path === '/search') {
+        handlerPromise = handleSearch(event, db);
+      } else if (httpMethod === 'GET' && path === '/proxy-image') {
+        handlerPromise = handleProxyImage(event);
+      } else {
         try {
           const user = await authenticateToken(event);
   
-          if (httpMethod === 'POST' && path === '/refresh-token') response = await handleRefreshToken(event, db);
-          else if (httpMethod === 'PUT' && path.startsWith('/editprofile/')) response = await handleEditProfile(event, db, user);
-          else if (httpMethod === 'POST' && path.startsWith('/newpost/')) response = await handleNewPost(event, db, user);
-          else if (httpMethod === 'PUT' && path.startsWith('/editpost/')) response = await handleEditPost(event, db, user);
-          else if (httpMethod === 'DELETE' && path.startsWith('/deletepost/')) response = await handleDeletePost(event, db, user);
-          else response = { statusCode: 404, body: JSON.stringify({ error: 'Route not found' }) };
+          if (httpMethod === 'POST' && path === '/refresh-token') {
+            handlerPromise = handleRefreshToken(event, db);
+          } else if (httpMethod === 'PUT' && path.startsWith('/editprofile/')) {
+            handlerPromise = handleEditProfile(event, db, user);
+          } else if (httpMethod === 'POST' && path.startsWith('/newpost/')) {
+            handlerPromise = handleNewPost(event, db, user);
+          } else if (httpMethod === 'PUT' && path.startsWith('/editpost/')) {
+            handlerPromise = handleEditPost(event, db, user);
+          } else if (httpMethod === 'DELETE' && path.startsWith('/deletepost/')) {
+            handlerPromise = handleDeletePost(event, db, user);
+          } else {
+            response = { statusCode: 404, body: JSON.stringify({ error: 'Route not found' }) };
+          }
         } catch (authError) {
           console.error("Authentication error:", authError);
           response = { 
@@ -96,6 +149,16 @@ exports.handler = async (event) => {
             }) 
           };
         }
+      }
+
+      // Execute handler with timeout if a valid handler was found
+      if (handlerPromise && !response) {
+        // Use longer timeout (14 seconds) for handler execution
+        response = await withTimeout(
+          handlerPromise,
+          14000,
+          "Handler operation timed out - the operation might be too resource-intensive for Lambda"
+        );
       }
     } catch (handlerError) {
       console.error("Handler error:", handlerError);

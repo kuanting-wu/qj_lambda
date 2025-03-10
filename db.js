@@ -45,8 +45,8 @@ const getDBConnection = async () => {
       password: dbConfig.password,
       database: dbConfig.database,
       port: dbConfig.port,
-      // Connect timeout in ms - reduced for Lambda
-      connectionTimeoutMillis: 3000,
+      // Increase connect timeout for Lambda cold starts
+      connectionTimeoutMillis: 8000,
       // Idle timeout in ms
       idleTimeoutMillis: 10000, 
       // Max clients - reduced for Lambda
@@ -56,12 +56,14 @@ const getDBConnection = async () => {
       // Enable SSL but allow unauthorized certificates
       ssl: {
         rejectUnauthorized: false
-      }
+      },
+      // Add statement timeout to prevent long-running queries
+      statement_timeout: 5000
     });
     
-    // Test the connection with a shorter timeout for Lambda
+    // Test the connection with an appropriate timeout for Lambda
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Connection timeout - could not connect to database')), 2500);
+      setTimeout(() => reject(new Error('Connection timeout - could not connect to database')), 7500);
     });
     
     const connectionPromise = async () => {
