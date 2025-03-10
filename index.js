@@ -40,6 +40,18 @@ const withTimeout = (promise, timeoutMs = 15000, errorMessage = 'Operation timed
 exports.handler = async (event) => {
   try {
     console.log("Lambda invoked with event:", JSON.stringify(event));
+    
+    // Log environment variables for debugging (excluding sensitive ones)
+    console.log("Environment variables:", Object.keys(process.env)
+      .filter(key => !key.includes('KEY') && !key.includes('SECRET') && !key.includes('PASSWORD'))
+      .map(key => `${key}=${process.env[key] ? (key === 'SES_EMAIL_FROM' ? process.env[key] : '[SET]') : '[UNSET]'}`)
+      .join(', '));
+    
+    // Check SES configuration
+    if (!process.env.SES_EMAIL_FROM) {
+      console.warn("WARNING: SES_EMAIL_FROM environment variable is not set. Email sending will fail.");
+    }
+    
     const { httpMethod, path } = event;
 
     // Handle CORS preflight requests - now handled by API Gateway

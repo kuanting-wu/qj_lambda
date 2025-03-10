@@ -28,18 +28,37 @@ const handleSignup = async (event, db) => {
     }
 
     try {
+        console.log("Starting database check for existing user...");
+        
         // Check if email or username already exists - combined into a single query for performance
-        const [existingRecords] = await db.execute(`
-            SELECT 
-                (SELECT COUNT(*) FROM users WHERE email = $1) AS email_count,
-                (SELECT COUNT(*) FROM profiles WHERE username = $2) AS username_count
-        `, [email, username]);
+        let existingRecords;
+        try {
+            console.log(`Checking if email "${email}" or username "${username}" already exists...`);
+            const queryResult = await db.execute(`
+                SELECT 
+                    (SELECT COUNT(*) FROM users WHERE email = $1) AS email_count,
+                    (SELECT COUNT(*) FROM profiles WHERE username = $2) AS username_count
+            `, [email, username]);
+            
+            existingRecords = queryResult[0];
+            
+            console.log("Database check complete:", 
+                existingRecords && existingRecords[0] ? 
+                    `email_count: ${existingRecords[0].email_count}, username_count: ${existingRecords[0].username_count}` : 
+                    "No results returned"
+            );
+        } catch (queryError) {
+            console.error("Error checking for existing user:", queryError);
+            throw queryError; // Re-throw to be caught by outer try-catch
+        }
         
         if (existingRecords[0].email_count > 0) {
+            console.log("Email already in use");
             return { statusCode: 400, body: JSON.stringify({ error: 'Email is already in use' }) };
         }
         
         if (existingRecords[0].username_count > 0) {
+            console.log("Username already in use");
             return { statusCode: 400, body: JSON.stringify({ error: 'Username is already in use' }) };
         }
 
@@ -151,18 +170,32 @@ const handleSignup = async (event, db) => {
         
         console.log("Email process complete, continuing with response...");
 
+        // Log information about the final state
+        console.log(`Registration process complete: userId=${userId}, emailSent=${emailSent}`);
+        
+        const responseData = { 
+            message: emailSent ? 
+                'User registered successfully! Check your email.' : 
+                'User registered successfully! Email verification is temporarily unavailable.',
+            email: email,
+            userId: userId,
+            requiresVerification: true, 
+            verificationSent: emailSent,
+            verificationExpiry: tokenExpiry.toISOString()
+        };
+        
+        // In development, include email configuration status
+        if (process.env.NODE_ENV === 'development' || !emailSent) {
+            responseData.debug = {
+                ses_email_from_set: Boolean(process.env.SES_EMAIL_FROM),
+                email_service_status: emailSent ? 'operational' : 'unavailable'
+            };
+        }
+        
+        console.log("Returning registration response");
         return { 
             statusCode: 201, 
-            body: JSON.stringify({ 
-                message: emailSent ? 
-                    'User registered successfully! Check your email.' : 
-                    'User registered successfully! Email verification is temporarily unavailable.',
-                email: email,
-                userId: userId,
-                requiresVerification: true, 
-                verificationSent: emailSent,
-                verificationExpiry: tokenExpiry.toISOString()
-            }) 
+            body: JSON.stringify(responseData)
         };
     } catch (error) {
         // Rollback transaction on error if it exists
