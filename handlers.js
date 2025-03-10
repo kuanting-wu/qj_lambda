@@ -620,8 +620,9 @@ const handleResetPassword = async (event, db) => {
 // Handle View Post
 const handleViewPost = async (event, db) => {
     const postId = event.pathParameters.id;
+    const { getMarkdownUrl } = require('./s3-helper'); // Import S3 helper
 
-    // Define the query to join the posts and profiles tables
+    // Define the query to join the posts and profiles tables with the new structure
     const query = `
       SELECT 
         p.id,
@@ -634,13 +635,14 @@ const handleViewPost = async (event, db) => {
         p.sequence_start_time,
         p.public_status,
         p.language,
-        p.notes,
-        pr.username,
+        p.notes_path,
+        p.created_at,
+        p.owner_name,
         pr.avatar_url,
         pr.belt,
         pr.academy
       FROM posts p
-      JOIN profiles pr ON p.owner_id = pr.user_id
+      JOIN profiles pr ON p.owner_name = pr.username
       WHERE p.id = $1
     `;
 
@@ -653,10 +655,26 @@ const handleViewPost = async (event, db) => {
             return { statusCode: 404, body: JSON.stringify({ error: 'Post not found' }) };
         }
 
+        const post = results[0];
+        
+        // If there's a markdown notes path, get the full URL
+        if (post.notes_path) {
+            try {
+                // Get the URL for the markdown file
+                const markdownUrl = await getMarkdownUrl(post.notes_path);
+                post.markdown_url = markdownUrl;
+            } catch (s3Error) {
+                console.error('Error getting markdown URL:', s3Error);
+                // Don't fail the whole request if S3 has an issue
+                post.markdown_url = null;
+                post.markdown_error = 'Unable to retrieve notes file';
+            }
+        }
+
         // Return the post data
         return {
             statusCode: 200,
-            body: JSON.stringify(results[0]), // Return the first result (as there should be only one post with this ID)
+            body: JSON.stringify(post), 
         };
     } catch (error) {
         console.error('Error fetching post:', error);
@@ -687,6 +705,9 @@ const handleViewProfile = async (event, db) => {
 };
 // Handle Search
 const handleSearch = async (event, db) => {
+    console.log("Search handler called with parameters:", JSON.stringify(event.queryStringParameters));
+    
+    // Extract query parameters with defaults
     const {
         search = '',
         postBy = '',
@@ -696,60 +717,79 @@ const handleSearch = async (event, db) => {
         publicStatus = '',
         language = '',
         sortOption = 'newToOld',
-    } = event.queryStringParameters;
+    } = event.queryStringParameters || {};
+
+    console.log("Extracted parameters:", { 
+        search, postBy, movementType, startingPosition, 
+        endingPosition, publicStatus, language, sortOption 
+    });
 
     const sortOrder = sortOption === 'oldToNew' ? 'ASC' : 'DESC';
 
     // Get the current user from the event (simulating the authenticated user)
-    const currentUser = event.requestContext.authorizer ? event.requestContext.authorizer.username : null;
-    const currentUserId = event.requestContext.authorizer ? event.requestContext.authorizer.user_id : null;
-
-    // SQL query with conditional logic for post visibility (public/private)
-    const query = `
-      SELECT 
-        p.id,
-        p.video_id,
-        p.video_platform,
-        p.title,
-        pr.username,
-        pr.belt,
-        pr.academy,
-        pr.avatar_url,
-        p.movement_type,
-        p.created_at
-      FROM posts p
-      JOIN profiles pr ON p.owner_id = pr.user_id
-      WHERE 1=1
-        AND (LOWER(p.title) LIKE LOWER(?) OR ? = '')
-        AND (LOWER(pr.username) = LOWER(?) OR ? = '')
-        AND (LOWER(p.movement_type) LIKE LOWER(?) OR ? = '')
-        AND (LOWER(p.starting_position) LIKE LOWER(?) OR ? = '')
-        AND (LOWER(p.ending_position) LIKE LOWER(?) OR ? = '')
-        AND (LOWER(p.language) LIKE LOWER(?) OR ? = '')
-        AND (
-          (? = '' AND (LOWER(p.public_status) = 'public' OR (LOWER(p.public_status) = 'private' AND p.owner_id = ?)))
-          OR (? = 'Public' AND LOWER(p.public_status) = 'public')
-          OR (? = 'Private' AND LOWER(p.public_status) = 'private' AND p.owner_id = ?)
-        )
-      ORDER BY p.created_at ${sortOrder}
-    `;
-
-    // Prepare query parameters
-    const queryParams = [
-        `%${search}%`, search,
-        postBy, postBy, // Exact match for pr.username
-        `%${movementType}%`, movementType,
-        `%${startingPosition}%`, startingPosition,
-        `%${endingPosition}%`, endingPosition,
-        `%${language}%`, language,
-        publicStatus, currentUserId,  // Case 1: public or private posts if owned by currentUser
-        publicStatus,                 // Case 2: public posts only
-        publicStatus, currentUserId   // Case 3: private posts if owned by currentUser
-    ];
+    const currentUser = event.requestContext?.authorizer?.username || null;
+    const currentUserId = event.requestContext?.authorizer?.user_id || null;
+    
+    console.log("Current user context:", { currentUser, currentUserId });
 
     try {
+        // Updated query to work with the new schema (owner_name instead of owner_id)
+        const query = `
+          SELECT 
+            p.id,
+            p.video_id,
+            p.video_platform,
+            p.title,
+            p.owner_name as username,
+            pr.belt,
+            pr.academy,
+            pr.avatar_url,
+            p.movement_type,
+            p.created_at
+          FROM posts p
+          JOIN profiles pr ON p.owner_name = pr.username
+          WHERE 1=1
+            AND (LOWER(p.title) LIKE LOWER($1) OR $2 = '')
+            AND (LOWER(p.owner_name) = LOWER($3) OR $4 = '')
+            AND (LOWER(p.movement_type) LIKE LOWER($5) OR $6 = '')
+            AND (LOWER(p.starting_position) LIKE LOWER($7) OR $8 = '')
+            AND (LOWER(p.ending_position) LIKE LOWER($9) OR $10 = '')
+            AND (LOWER(p.language) LIKE LOWER($11) OR $12 = '')
+            AND (
+              (
+                $13 = '' AND 
+                (
+                  LOWER(p.public_status) = 'public' OR 
+                  (LOWER(p.public_status) = 'private' AND p.owner_name = $14)
+                )
+              )
+              OR ($15 = 'public' AND LOWER(p.public_status) = 'public')
+              OR ($16 = 'private' AND LOWER(p.public_status) = 'private' AND p.owner_name = $17)
+            )
+          ORDER BY p.created_at ${sortOrder}
+        `;
+
+        // Prepare query parameters - using currentUser instead of currentUserId for owner_name comparison
+        const queryParams = [
+            `%${search}%`, search,
+            postBy, postBy, // Exact match for owner_name
+            `%${movementType}%`, movementType,
+            `%${startingPosition}%`, startingPosition,
+            `%${endingPosition}%`, endingPosition,
+            `%${language}%`, language,
+            publicStatus, currentUser,  // Case 1: public or private posts if owned by currentUser
+            publicStatus,               // Case 2: public posts only
+            publicStatus, currentUser   // Case 3: private posts if owned by currentUser
+        ];
+
+        console.log("Executing query with params:", {
+            query: query.replace(/\s+/g, ' ').trim(),
+            parameters: queryParams
+        });
+
         // Execute the query
         const [results] = await db.execute(query, queryParams);
+        console.log(`Query returned ${results.length} results`);
 
         // Format the results
         const formattedResults = results.map(post => ({
@@ -768,14 +808,28 @@ const handleSearch = async (event, db) => {
         // Return the formatted results
         return {
             statusCode: 200,
-            body: JSON.stringify({ posts: formattedResults }),
+            body: JSON.stringify({ 
+                posts: formattedResults,
+                count: formattedResults.length
+            }),
         };
 
     } catch (error) {
         console.error('Error fetching posts:', error);
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            code: error.code,
+            query: error.query
+        });
+        
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: 'Failed to fetch posts' }),
+            body: JSON.stringify({ 
+                error: 'Failed to fetch posts',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+                code: process.env.NODE_ENV === 'development' ? error.code : undefined
+            }),
         };
     }
 };
@@ -1256,84 +1310,129 @@ const handleEditProfile = async (event, db, user) => {
 
 // Handle New Post
 const handleNewPost = async (event, db, user) => {
+    const { uploadMarkdownToS3 } = require('./s3-helper');
     const { title, video_id, video_platform, movement_type, starting_position, ending_position, sequence_start_time, public_status, language, notes } = JSON.parse(event.body);
     const { id } = event.pathParameters; // Get the post ID from the URL path
 
     // Validate required fields
-    if (!title || !video_id || !video_platform || !movement_type || !starting_position || !ending_position || !sequence_start_time || !public_status || !language || !notes) {
+    if (!title || !video_id || !video_platform || !movement_type || !starting_position || !ending_position || !sequence_start_time || !public_status || !language) {
         return {
             statusCode: 400,
-            body: JSON.stringify({ error: 'All fields are required to create a new post' })
+            body: JSON.stringify({ error: 'Required fields are missing to create a new post' })
         };
     }
 
     try {
-        // Insert the new post into the database
+        // First, get the username for the current user
+        const [userResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [user.user_id]);
+        
+        if (userResult.length === 0) {
+            return {
+                statusCode: 404,
+                body: JSON.stringify({ error: 'User profile not found' })
+            };
+        }
+        
+        const username = userResult[0].username;
+        let notesPath = null;
+        
+        // If notes are provided, upload them to S3
+        if (notes && notes.trim() !== '') {
+            try {
+                notesPath = await uploadMarkdownToS3(notes, id, username);
+                console.log(`Markdown uploaded successfully with path: ${notesPath}`);
+            } catch (s3Error) {
+                console.error('Error uploading markdown to S3:', s3Error);
+                return {
+                    statusCode: 500,
+                    body: JSON.stringify({ error: 'Failed to upload notes to storage' })
+                };
+            }
+        }
+
+        // Insert the new post into the database with the updated schema
         const query = `
         INSERT INTO posts (
           id,
           title,
           video_id,
           video_platform,
-          owner_id,
+          owner_name,
           movement_type,
           starting_position,
           ending_position,
           sequence_start_time,
           public_status,
           language,
-          notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          notes_path
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       `;
         const values = [
             id,
             title,
             video_id,
             video_platform,
-            user.user_id, // The authenticated user's ID
+            username, // Using username instead of user_id now
             movement_type,
             starting_position,
             ending_position,
             sequence_start_time,
             public_status,
             language,
-            notes
+            notesPath
         ];
 
-        const [result] = await db.execute(query, values);
+        await db.execute(query, values);
 
         // Return success message
         return {
             statusCode: 201,
-            body: JSON.stringify({ message: 'Post created successfully' })
+            body: JSON.stringify({ 
+                message: 'Post created successfully',
+                post_id: id,
+                notes_path: notesPath
+            })
         };
     } catch (error) {
         console.error('Error creating new post:', error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: 'Failed to create a new post' })
+            body: JSON.stringify({ error: 'Failed to create a new post', details: error.message })
         };
     }
 };
 
 // Handle Edit Post
 const handleEditPost = async (event, db, user) => {
+    const { uploadMarkdownToS3, deleteMarkdownFromS3 } = require('./s3-helper');
     const postId = event.pathParameters.id;
     const { title, video_id, video_platform, movement_type, starting_position, ending_position, sequence_start_time, public_status, language, notes } = JSON.parse(event.body);
 
     // Validate required fields
-    if (!title || !video_id || !video_platform || !movement_type || !starting_position || !ending_position || !sequence_start_time || !public_status || !language || !notes) {
+    if (!title || !video_id || !video_platform || !movement_type || !starting_position || !ending_position || !sequence_start_time || !public_status || !language) {
         return {
             statusCode: 400,
-            body: JSON.stringify({ error: 'All fields are required to update the post' })
+            body: JSON.stringify({ error: 'Required fields are missing to update the post' })
         };
     }
 
     try {
-        // First, check if the post exists and get the owner's id
-        const [results] = await db.execute('SELECT owner_id FROM posts WHERE id = ?', [postId]);
+        // First, get the username for the current user
+        const [userResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [user.user_id]);
+        
+        if (userResult.length === 0) {
+            return {
+                statusCode: 404,
+                body: JSON.stringify({ error: 'User profile not found' })
+            };
+        }
+        
+        const username = userResult[0].username;
+        
+        // Check if the post exists and if current user is the owner
+        const [postResults] = await db.execute('SELECT owner_name, notes_path FROM posts WHERE id = $1', [postId]);
 
-        if (results.length === 0) {
+        if (postResults.length === 0) {
             return {
                 statusCode: 404,
                 body: JSON.stringify({ error: 'Post not found' })
@@ -1341,29 +1440,64 @@ const handleEditPost = async (event, db, user) => {
         }
 
         // Check if the authenticated user is the owner of the post
-        const postOwnerId = results[0].owner_id;
-        if (parseInt(user.user_id) !== parseInt(postOwnerId)) {
+        const postOwnerName = postResults[0].owner_name;
+        if (username !== postOwnerName) {
             return {
                 statusCode: 403,
                 body: JSON.stringify({ error: 'User not authorized to edit this post' })
             };
         }
 
-        // Proceed with updating the post if the user is the owner
+        // Get the existing notes path, if any
+        const existingNotesPath = postResults[0].notes_path;
+        let newNotesPath = existingNotesPath;
+        
+        // If notes are provided and different, upload to S3 and update path
+        if (notes !== undefined) {
+            try {
+                // Delete existing markdown file if it exists
+                if (existingNotesPath) {
+                    try {
+                        await deleteMarkdownFromS3(existingNotesPath);
+                        console.log(`Deleted existing markdown file: ${existingNotesPath}`);
+                    } catch (deleteError) {
+                        console.error('Error deleting existing markdown:', deleteError);
+                        // Continue with update even if delete fails
+                    }
+                }
+                
+                // Upload new markdown file if content is provided
+                if (notes && notes.trim() !== '') {
+                    newNotesPath = await uploadMarkdownToS3(notes, postId, username);
+                    console.log(`Uploaded new markdown file: ${newNotesPath}`);
+                } else {
+                    // If notes is empty, set notes_path to null
+                    newNotesPath = null;
+                }
+            } catch (s3Error) {
+                console.error('Error handling markdown file:', s3Error);
+                return {
+                    statusCode: 500,
+                    body: JSON.stringify({ error: 'Failed to update notes file' })
+                };
+            }
+        }
+
+        // Proceed with updating the post
         const updateQuery = `
         UPDATE posts
         SET
-          title = ?,
-          video_id = ?,
-          video_platform = ?,
-          movement_type = ?,
-          starting_position = ?,
-          ending_position = ?,
-          sequence_start_time = ?,
-          public_status = ?,
-          language = ?,
-          notes = ?
-        WHERE id = ? AND owner_id = ?
+          title = $1,
+          video_id = $2,
+          video_platform = $3,
+          movement_type = $4,
+          starting_position = $5,
+          ending_position = $6,
+          sequence_start_time = $7,
+          public_status = $8,
+          language = $9,
+          notes_path = $10
+        WHERE id = $11 AND owner_name = $12
       `;
 
         await db.execute(updateQuery, [
@@ -1376,33 +1510,49 @@ const handleEditPost = async (event, db, user) => {
             sequence_start_time,
             public_status,
             language,
-            notes,
+            newNotesPath,
             postId,
-            user.user_id
+            username
         ]);
 
         // Return success message
         return {
             statusCode: 200,
-            body: JSON.stringify({ message: 'Post updated successfully' })
+            body: JSON.stringify({ 
+                message: 'Post updated successfully',
+                notes_path: newNotesPath
+            })
         };
 
     } catch (error) {
         console.error('Error updating post:', error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: 'Failed to update the post' })
+            body: JSON.stringify({ error: 'Failed to update the post', details: error.message })
         };
     }
 };
 
 // Handle Delete Post
 const handleDeletePost = async (event, db, user) => {
+    const { deleteMarkdownFromS3 } = require('./s3-helper');
     const postId = event.pathParameters.id;
 
     try {
-        // First, check if the post exists and retrieve the owner's id
-        const [results] = await db.execute('SELECT owner_id FROM posts WHERE id = ?', [postId]);
+        // First, get the username for the current user
+        const [userResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [user.user_id]);
+        
+        if (userResult.length === 0) {
+            return {
+                statusCode: 404,
+                body: JSON.stringify({ error: 'User profile not found' })
+            };
+        }
+        
+        const username = userResult[0].username;
+        
+        // Check if the post exists and if user is the owner
+        const [results] = await db.execute('SELECT owner_name, notes_path FROM posts WHERE id = $1', [postId]);
 
         if (results.length === 0) {
             return {
@@ -1412,25 +1562,31 @@ const handleDeletePost = async (event, db, user) => {
         }
 
         // Check if the authenticated user is the owner of the post
-        const postOwnerId = results[0].owner_id;
-        if (parseInt(user.user_id) !== parseInt(postOwnerId)) {
+        const postOwnerName = results[0].owner_name;
+        if (username !== postOwnerName) {
             return {
                 statusCode: 403,
                 body: JSON.stringify({ error: 'User not authorized to delete this post' })
             };
         }
 
-        // Proceed with deleting the post if the user is the owner
-        const deleteQuery = 'DELETE FROM posts WHERE id = ?';
-        const [deleteResults] = await db.execute(deleteQuery, [postId]);
-
-        // If no rows were affected, the deletion failed (post might have already been deleted)
-        if (deleteResults.affectedRows === 0) {
-            return {
-                statusCode: 404,
-                body: JSON.stringify({ error: 'Post not found or already deleted' })
-            };
+        // Get the notes path to delete the file from S3 if it exists
+        const notesPath = results[0].notes_path;
+        
+        // If there is a markdown file, try to delete it
+        if (notesPath) {
+            try {
+                await deleteMarkdownFromS3(notesPath);
+                console.log(`Deleted markdown file: ${notesPath}`);
+            } catch (s3Error) {
+                console.error('Error deleting markdown file:', s3Error);
+                // Continue with post deletion even if S3 delete fails
+            }
         }
+
+        // Proceed with deleting the post
+        const deleteQuery = 'DELETE FROM posts WHERE id = $1 AND owner_name = $2';
+        await db.execute(deleteQuery, [postId, username]);
 
         // Send a success message
         return {
@@ -1442,7 +1598,7 @@ const handleDeletePost = async (event, db, user) => {
         console.error('Error deleting post:', error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: 'Failed to delete the post' })
+            body: JSON.stringify({ error: 'Failed to delete the post', details: error.message })
         };
     }
 };
