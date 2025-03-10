@@ -12,7 +12,7 @@ const handleSignup = async (event, db) => {
     try {
         console.log("Starting signup process with event body:", event.body);
         const parsedBody = JSON.parse(event.body);
-        username = parsedBody.name; // In the frontend, the username field is called 'name'
+        username = parsedBody.username; // Username field from frontend
         email = parsedBody.email;
         password = parsedBody.password;
         
