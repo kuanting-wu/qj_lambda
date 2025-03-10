@@ -1037,7 +1037,7 @@ const handleGoogleSignin = async (event, db) => {
 // Handle Edit Profile
 const handleEditProfile = async (event, db, user) => {
     console.log("Edit profile handler called", { pathParameters: event.pathParameters, user });
-    const { userId } = event.pathParameters; // Extract userId from URL path
+    const user_id = event.pathParameters.user_id; // Extract user_id from URL path
     
     try {
         // Parse the request body and extract all fields
@@ -1047,11 +1047,11 @@ const handleEditProfile = async (event, db, user) => {
             social_links, achievements, website_url, contact_email, avatar_url
         } = JSON.parse(event.body);
         
-        console.log("Profile update data:", { userId, user_id: user.user_id, username: user.username });
+        console.log("Profile update data:", { path_user_id: user_id, auth_user_id: user.user_id, username: user.username });
 
         // Check if the authenticated user is trying to edit their own profile
-        if (user.user_id !== userId && String(user.user_id) !== String(userId)) {
-            console.warn(`Auth mismatch: User ${user.user_id} attempting to edit profile for user ${userId}`);
+        if (user.user_id !== user_id && String(user.user_id) !== String(user_id)) {
+            console.warn(`Auth mismatch: User ${user.user_id} attempting to edit profile for user ${user_id}`);
             return {
                 statusCode: 403,
                 body: JSON.stringify({ error: 'User not authorized to edit this profile' })
