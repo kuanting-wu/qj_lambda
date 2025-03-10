@@ -304,22 +304,54 @@ const handleSignin = async (event, db) => {
 
 // Handle Email Verification (Lambda version)
 const handleVerifyEmail = async (event, db) => {
-    const { token } = event.queryStringParameters;
+    console.log("Email verification handler called with event:", JSON.stringify(event));
+    console.log("Query parameters:", JSON.stringify(event.queryStringParameters));
+    
+    // Safely extract token
+    const token = event.queryStringParameters?.token;
+    
+    console.log("Extracted token:", token);
 
     // Check if the token is provided
     if (!token) {
+        console.log("No token provided in query parameters");
         return { statusCode: 400, body: JSON.stringify({ error: 'Token is required' }) };
     }
 
     try {
+        console.log(`Looking up user with token: ${token}`);
+        
         // First, try to find the user with this token regardless of expiry
         const [usersWithToken] = await db.execute(
             'SELECT id, email, verification_token_expiry, email_verified FROM users WHERE verification_token = $1',
             [token]
         );
+        
+        console.log(`Database query complete, found ${usersWithToken.length} users with this token`);
+        if (usersWithToken.length > 0) {
+            console.log("User details:", JSON.stringify({
+                id: usersWithToken[0].id,
+                email: usersWithToken[0].email,
+                email_verified: usersWithToken[0].email_verified,
+                verification_token_expiry: usersWithToken[0].verification_token_expiry
+            }));
+        }
 
         // If no user is found, the token is invalid
         if (usersWithToken.length === 0) {
+            console.log("No user found with this token - invalid token");
+            // Debug: Query to check if any tokens exist in the database
+            try {
+                const [allTokens] = await db.execute(
+                    'SELECT email, verification_token FROM users WHERE verification_token IS NOT NULL LIMIT 5'
+                );
+                console.log(`Found ${allTokens.length} users with tokens. Sample tokens:`, 
+                    allTokens.map(u => ({email: u.email, token_fragment: u.verification_token?.substring(0, 8) + '...' }))
+                );
+            } catch (debugError) {
+                console.error("Error in debug query:", debugError);
+            }
+            
             return { statusCode: 400, body: JSON.stringify({ error: 'Invalid verification token' }) };
         }
 
@@ -348,13 +380,27 @@ const handleVerifyEmail = async (event, db) => {
         }
 
         // Token is valid and not expired - update the user's email verification status
-        await db.execute(
-            'UPDATE users SET email_verified = TRUE, verification_token = NULL, verification_token_expiry = NULL WHERE id = $1',
-            [user.id]
-        );
+        console.log(`Verifying email for user ${user.id} with token ${token}`);
+        
+        try {
+            await db.execute(
+                'UPDATE users SET email_verified = TRUE, verification_token = NULL, verification_token_expiry = NULL WHERE id = $1',
+                [user.id]
+            );
+            console.log(`Successfully verified email for user ${user.id} (${user.email})`);
+        } catch (updateError) {
+            console.error(`Error updating user verification status:`, updateError);
+            throw updateError;
+        }
 
         // Return success response
-        return { statusCode: 200, body: JSON.stringify({ message: 'Email verified successfully!' }) };
+        console.log("Returning success response");
+        return { statusCode: 200, body: JSON.stringify({ 
+            message: 'Email verified successfully!',
+            email: user.email,
+            verified: true 
+        })
+        };
     } catch (error) {
         console.error('Error verifying email:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal server error' }) };
