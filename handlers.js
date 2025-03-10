@@ -7,11 +7,20 @@ const { verifyGoogleToken } = require('./google-auth');
 
 // Handle Signup
 const handleSignup = async (event, db) => {
-    const { name, email, password } = JSON.parse(event.body);
-    const username = name; // In the frontend, the username field is called 'name'
-    
-    if (!username || !email || !password) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Username, email, and password are required' }) };
+    try {
+        console.log("Starting signup process with event body:", event.body);
+        const { name, email, password } = JSON.parse(event.body);
+        const username = name; // In the frontend, the username field is called 'name'
+        
+        console.log(`Signup attempt for username: ${username}, email: ${email}`);
+        
+        if (!username || !email || !password) {
+            console.log("Missing required fields for signup");
+            return { statusCode: 400, body: JSON.stringify({ error: 'Username, email, and password are required' }) };
+        }
+    } catch (parseError) {
+        console.error("Error parsing signup request:", parseError);
+        return { statusCode: 400, body: JSON.stringify({ error: 'Invalid request format', details: parseError.message }) };
     }
 
     try {
@@ -127,15 +136,33 @@ const handleSignup = async (event, db) => {
     } catch (error) {
         // Rollback transaction on error if it exists
         try {
-            if (db && typeof db.rollback === 'function') {
+            if (db && typeof db.rollback === 'function' && db.connection.inTransaction) {
                 await db.rollback();
+                console.log("Transaction rolled back successfully");
             }
         } catch (rollbackError) {
             console.error('Rollback error:', rollbackError);
         }
         
+        // Detailed error logging
         console.error('Signup error:', error);
-        return { statusCode: 500, body: JSON.stringify({ error: 'Failed to register user' }) };
+        console.error('Error details:', {
+            message: error.message,
+            code: error.code,
+            stack: error.stack,
+            queryError: error.query || 'No query info',
+            params: error.params || 'No params info'
+        });
+        
+        // Return more specific error message for debugging
+        return { 
+            statusCode: 500, 
+            body: JSON.stringify({ 
+                error: 'Failed to register user',
+                message: process.env.NODE_ENV === 'development' ? error.message : undefined,
+                code: process.env.NODE_ENV === 'development' ? error.code : undefined
+            }) 
+        };
     }
 };
 

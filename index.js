@@ -20,10 +20,13 @@ const {
 } = require('./handlers');
 
 // Set a timeout function to guard against hanging operations
-const withTimeout = (promise, timeoutMs = 10000, errorMessage = 'Operation timed out') => {
+const withTimeout = (promise, timeoutMs = 15000, errorMessage = 'Operation timed out') => {
   let timeoutId;
   const timeoutPromise = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+    timeoutId = setTimeout(() => {
+      console.warn(`Operation timeout after ${timeoutMs}ms: ${errorMessage}`);
+      reject(new Error(errorMessage));
+    }, timeoutMs);
   });
   
   return Promise.race([

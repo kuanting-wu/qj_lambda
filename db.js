@@ -79,24 +79,50 @@ const getDBConnection = async () => {
     // Add execute method to match MySQL interface so we don't have to change handler code
     cachedPool.execute = async (text, params) => {
       try {
-        const result = await cachedPool.query(text, params);
+        let result;
+        
+        // If in a transaction, use the transaction client
+        if (cachedPool.client) {
+          console.log('Executing query within transaction');
+          result = await cachedPool.client.query(text, params);
+        } else {
+          // Otherwise use the pool
+          result = await cachedPool.query(text, params);
+        }
+        
         return [result.rows, result.fields];
       } catch (error) {
         console.error('SQL Query error:', error.message);
         console.error('Query:', text);
         console.error('Params:', params);
+        // Add stack trace for better debugging
+        if (error.stack) console.error('Stack trace:', error.stack);
         throw error;
       }
     };
     
     // Add transaction methods to match MySQL interface
+    // Using a dedicated client per transaction instead of sharing it
     cachedPool.beginTransaction = async () => {
       try {
+        if (cachedPool.client) {
+          console.warn('Transaction already in progress, releasing previous client');
+          try {
+            await cachedPool.client.query('ROLLBACK');
+            cachedPool.client.release();
+          } catch (err) {
+            console.error('Error releasing existing transaction client:', err);
+          }
+        }
+        
+        console.log('Beginning new transaction');
         const client = await cachedPool.connect();
         cachedPool.client = client;
         await client.query('BEGIN');
+        console.log('Transaction started successfully');
       } catch (error) {
         console.error('Error beginning transaction:', error.message);
+        if (error.stack) console.error('Stack:', error.stack);
         throw error;
       }
     };
@@ -108,20 +134,24 @@ const getDBConnection = async () => {
       }
       
       try {
+        console.log('Committing transaction');
         await cachedPool.client.query('COMMIT');
-        cachedPool.client.release();
-        cachedPool.client = null;
+        console.log('Transaction committed successfully');
       } catch (error) {
         console.error('Error committing transaction:', error.message);
+        if (error.stack) console.error('Stack:', error.stack);
+        throw error;
+      } finally {
+        // Always release the client when done
         if (cachedPool.client) {
           try {
             cachedPool.client.release();
+            console.log('Client released after commit');
           } catch (releaseError) {
-            console.error('Error releasing client after commit error:', releaseError.message);
+            console.error('Error releasing client after commit:', releaseError.message);
           }
           cachedPool.client = null;
         }
-        throw error;
       }
     };
     
@@ -132,20 +162,23 @@ const getDBConnection = async () => {
       }
       
       try {
+        console.log('Rolling back transaction');
         await cachedPool.client.query('ROLLBACK');
-        cachedPool.client.release();
-        cachedPool.client = null;
+        console.log('Transaction rolled back successfully');
       } catch (error) {
         console.error('Error rolling back transaction:', error.message);
+        if (error.stack) console.error('Stack:', error.stack);
+      } finally {
+        // Always release the client when done
         if (cachedPool.client) {
           try {
             cachedPool.client.release();
+            console.log('Client released after rollback');
           } catch (releaseError) {
-            console.error('Error releasing client after rollback error:', releaseError.message);
+            console.error('Error releasing client after rollback:', releaseError.message);
           }
           cachedPool.client = null;
         }
-        throw error;
       }
     };
     
