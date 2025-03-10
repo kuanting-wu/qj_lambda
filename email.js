@@ -52,13 +52,25 @@ const sendEmail = async (to, subject, htmlBody) => {
     console.log('Sending email with SES...');
     
     try {
-      // Add a timeout to prevent hanging on SES calls
+      // Try to send the email with a 1 second timeout
+      // This is a very short timeout, but in Lambda we want to fail fast
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Email sending timed out after 3 seconds')), 3000);
+        setTimeout(() => reject(new Error('Email sending timed out after 1 second')), 1000);
       });
       
+      console.log('Sending email command to SES...');
       const sendPromise = sesClient.send(new SendEmailCommand(params));
-      await Promise.race([sendPromise, timeoutPromise]);
+      
+      try {
+        await Promise.race([sendPromise, timeoutPromise]);
+      } catch (raceError) {
+        if (raceError.message.includes('timed out')) {
+          console.warn('SES timed out - checking SES verification status...');
+          console.log(`Is "${params.Source}" verified in SES? Account might still be in sandbox mode.`);
+          throw new Error('Email sending timed out. Ensure the sending email is verified in SES and your account is out of SES sandbox mode.');
+        }
+        throw raceError;
+      }
       
       console.log('Email sent successfully');
       return { success: true };

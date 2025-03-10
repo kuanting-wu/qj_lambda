@@ -128,7 +128,7 @@ const handleSignup = async (event, db) => {
         
         try {
             // Set a timeout for the email operation to prevent Lambda timeout
-            const emailTimeoutMs = 3000; // 3 seconds max for email
+            const emailTimeoutMs = 1500; // 1.5 seconds max for email (SES has 1 second timeout)
             
             // Define a timeout promise
             const emailTimeoutPromise = new Promise((_, reject) => {
@@ -184,13 +184,14 @@ const handleSignup = async (event, db) => {
             verificationExpiry: tokenExpiry.toISOString()
         };
         
-        // In development, include email configuration status
-        if (process.env.NODE_ENV === 'development' || !emailSent) {
-            responseData.debug = {
-                ses_email_from_set: Boolean(process.env.SES_EMAIL_FROM),
-                email_service_status: emailSent ? 'operational' : 'unavailable'
-            };
-        }
+        // Always include email configuration status for now to help with debugging
+        responseData.debug = {
+            ses_email_from_set: Boolean(process.env.SES_EMAIL_FROM),
+            ses_email_from_value: process.env.SES_EMAIL_FROM || 'not set',
+            email_service_status: emailSent ? 'operational' : 'unavailable',
+            verification_token: verificationToken, // Include token for testing
+            verification_link: verificationLink // Include link for testing
+        };
         
         console.log("Returning registration response");
         return { 
