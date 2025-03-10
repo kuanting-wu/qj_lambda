@@ -4,7 +4,14 @@ const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
 console.log('Creating SES client...');
 let sesClient;
 try {
-  sesClient = new SESClient();
+  // Create client with specific configuration to help diagnose issues
+  sesClient = new SESClient({
+    retryMode: 'standard',
+    maxAttempts: 1, // Reduce retry attempts for faster failure
+    requestHandler: {
+      connectionTimeout: 1000 // 1 second connection timeout
+    }
+  });
   console.log('SES client created successfully');
 } catch (err) {
   console.error('Error creating SES client:', err);
@@ -65,9 +72,49 @@ const sendEmail = async (to, subject, htmlBody) => {
         await Promise.race([sendPromise, timeoutPromise]);
       } catch (raceError) {
         if (raceError.message.includes('timed out')) {
-          console.warn('SES timed out - checking SES verification status...');
-          console.log(`Is "${params.Source}" verified in SES? Account might still be in sandbox mode.`);
-          throw new Error('Email sending timed out. Ensure the sending email is verified in SES and your account is out of SES sandbox mode.');
+          console.warn('SES timed out - starting network diagnostic...');
+          
+          // Test basic internet connectivity
+          try {
+            console.log('Testing network connectivity...');
+            const https = require('https');
+            
+            const connTestPromise = new Promise((resolve, reject) => {
+              const req = https.get('https://www.google.com', (res) => {
+                console.log(`Network test successful, status: ${res.statusCode}`);
+                res.resume();
+                resolve(true);
+              });
+              
+              req.on('error', (e) => {
+                console.error(`Network test error: ${e.message}`);
+                resolve(false);
+              });
+              
+              req.setTimeout(1000, () => {
+                console.error('Network test timed out');
+                req.destroy();
+                resolve(false);
+              });
+            });
+            
+            const connResult = await Promise.race([
+              connTestPromise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Network test outer timeout')), 1500))
+            ]);
+            
+            if (connResult) {
+              console.log('Lambda has internet connectivity, likely a permission issue with SES');
+              throw new Error('Email sending timed out. Lambda has internet connectivity but SES API call failed. Check IAM permissions.');
+            } else {
+              console.error('Lambda appears to have NO internet connectivity. Check VPC configuration.');
+              throw new Error('Email sending timed out. Lambda has no internet connectivity. Check VPC configuration and ensure Lambda has a route to internet.');
+            }
+          } catch (netTestError) {
+            console.error(`Network test failed: ${netTestError.message}`);
+            console.log(`Is "${params.Source}" verified in SES? Account might still be in sandbox mode.`);
+            throw new Error('Email sending timed out. Network diagnostic also failed. Check Lambda networking and IAM permissions.');
+          }
         }
         throw raceError;
       }

@@ -52,6 +52,81 @@ exports.handler = async (event) => {
       console.warn("WARNING: SES_EMAIL_FROM environment variable is not set. Email sending will fail.");
     }
     
+    // Test internet connectivity
+    try {
+      console.log("Testing internet connectivity...");
+      const https = require('https');
+      const connectivityCheck = new Promise((resolve, reject) => {
+        const req = https.get('https://www.google.com', (res) => {
+          console.log(`Internet connectivity test successful: Status ${res.statusCode}`);
+          // Consume response data to free up memory
+          res.resume();
+          resolve(true);
+        });
+        
+        req.on('error', (e) => {
+          console.error(`Internet connectivity test failed: ${e.message}`);
+          resolve(false);
+        });
+        
+        // Set a timeout of 2 seconds
+        req.setTimeout(2000, () => {
+          console.error('Internet connectivity test timed out');
+          req.destroy();
+          resolve(false);
+        });
+      });
+      
+      // Wait for connectivity test with a timeout
+      await Promise.race([
+        connectivityCheck,
+        new Promise((_, reject) => setTimeout(() => {
+          console.error('Connectivity test timeout (outer)');
+          reject(new Error('Connectivity test outer timeout'));
+        }, 2500))
+      ]);
+    } catch (connectError) {
+      console.error(`Error testing connectivity: ${connectError.message}`);
+    }
+    
+    // Test SES permissions
+    try {
+      console.log("Testing SES permissions...");
+      const { SESClient, ListIdentitiesCommand } = require('@aws-sdk/client-ses');
+      const sesClient = new SESClient();
+      
+      const permissionCheck = new Promise(async (resolve, reject) => {
+        try {
+          const listIdentitiesCommand = new ListIdentitiesCommand({
+            IdentityType: 'EmailAddress',
+            MaxItems: 10
+          });
+          
+          const identitiesResponse = await sesClient.send(listIdentitiesCommand);
+          console.log(`SES permissions test successful: Found ${identitiesResponse.Identities?.length || 0} verified identities`);
+          if (identitiesResponse.Identities?.length > 0) {
+            console.log(`Verified identities: ${identitiesResponse.Identities.join(', ')}`);
+          }
+          resolve(true);
+        } catch (sesError) {
+          console.error(`SES permissions test failed: ${sesError.message}`);
+          if (sesError.Code) console.error(`SES error code: ${sesError.Code}`);
+          resolve(false);
+        }
+      });
+      
+      // Wait for SES test with a timeout
+      await Promise.race([
+        permissionCheck,
+        new Promise((_, reject) => setTimeout(() => {
+          console.error('SES test outer timeout');
+          reject(new Error('SES test timeout'));
+        }, 2500))
+      ]);
+    } catch (sesTestError) {
+      console.error(`Error testing SES permissions: ${sesTestError.message}`);
+    }
+    
     const { httpMethod, path } = event;
 
     // Handle CORS preflight requests - now handled by API Gateway
