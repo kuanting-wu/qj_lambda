@@ -7,10 +7,14 @@ const { verifyGoogleToken } = require('./google-auth');
 
 // Handle Signup
 const handleSignup = async (event, db) => {
+    let username, email, password;
+
     try {
         console.log("Starting signup process with event body:", event.body);
-        const { name, email, password } = JSON.parse(event.body);
-        const username = name; // In the frontend, the username field is called 'name'
+        const parsedBody = JSON.parse(event.body);
+        username = parsedBody.name; // In the frontend, the username field is called 'name'
+        email = parsedBody.email;
+        password = parsedBody.password;
         
         console.log(`Signup attempt for username: ${username}, email: ${email}`);
         
