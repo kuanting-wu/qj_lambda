@@ -104,9 +104,22 @@ const handleSignup = async (event, db) => {
         const expiryDate = tokenExpiry.toLocaleString(); // Format the date for user-friendly display
         
         let emailSent = false;
+        const emailStartTime = Date.now();
+        console.log("Starting email sending process...");
+        
         try {
-            // Try to send email but don't block registration if it fails
-            const emailResult = await sendEmail(
+            // Set a timeout for the email operation to prevent Lambda timeout
+            const emailTimeoutMs = 3000; // 3 seconds max for email
+            
+            // Define a timeout promise
+            const emailTimeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error(`Email operation timed out after ${emailTimeoutMs}ms`));
+                }, emailTimeoutMs);
+            });
+            
+            // Email sending promise
+            const emailPromise = sendEmail(
                 email, 
                 'Verify your email', 
                 `<p>Hi ${username},</p>
@@ -114,15 +127,29 @@ const handleSignup = async (event, db) => {
                 <p>This verification link will expire in 24 hours (${expiryDate}).</p>
                 <p>If the link expires, you can request a new verification email from the sign-in page.</p>`
             );
+            
+            // Race the promises
+            const emailResult = await Promise.race([emailPromise, emailTimeoutPromise]);
+            const emailDuration = Date.now() - emailStartTime;
+            
+            console.log(`Email sending completed in ${emailDuration}ms`);
             emailSent = emailResult.success;
             
             if (!emailResult.success) {
                 console.warn(`Failed to send verification email to ${email}: ${emailResult.error?.message || 'Unknown error'}`);
             }
         } catch (emailError) {
-            console.error('Error sending verification email:', emailError);
+            const emailDuration = Date.now() - emailStartTime;
+            console.error(`Error sending verification email after ${emailDuration}ms:`, emailError.message);
+            
+            if (emailError.message.includes('timed out')) {
+                console.warn('Email sending was aborted due to timeout - continuing with registration');
+            }
+            
             // Continue with registration even if email fails
         }
+        
+        console.log("Email process complete, continuing with response...");
 
         return { 
             statusCode: 201, 
