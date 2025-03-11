@@ -632,6 +632,10 @@ const handleViewPost = async (event, db) => {
         p.movement_type,
         p.starting_position,
         p.ending_position,
+        p.starting_top_bottom,
+        p.ending_top_bottom,
+        p.gi_nogi,
+        p.practitioner,
         p.sequence_start_time,
         p.public_status,
         p.language,
@@ -714,6 +718,10 @@ const handleSearch = async (event, db) => {
         movementType = '',
         startingPosition = '',
         endingPosition = '',
+        startingTopBottom = '',
+        endingTopBottom = '',
+        giNogi = '',
+        practitioner = '',
         publicStatus = '',
         language = '',
         sortOption = 'newToOld',
@@ -721,7 +729,8 @@ const handleSearch = async (event, db) => {
 
     console.log("Extracted parameters:", { 
         search, postBy, movementType, startingPosition, 
-        endingPosition, publicStatus, language, sortOption 
+        endingPosition, startingTopBottom, endingTopBottom,
+        giNogi, practitioner, publicStatus, language, sortOption 
     });
 
     const sortOrder = sortOption === 'oldToNew' ? 'ASC' : 'DESC';
@@ -741,6 +750,10 @@ const handleSearch = async (event, db) => {
             p.video_platform,
             p.title,
             p.owner_name as username,
+            p.gi_nogi,
+            p.practitioner,
+            p.starting_top_bottom,
+            p.ending_top_bottom,
             pr.belt,
             pr.academy,
             pr.avatar_url,
@@ -754,17 +767,23 @@ const handleSearch = async (event, db) => {
             AND (LOWER(p.movement_type) LIKE LOWER($5) OR $6 = '')
             AND (LOWER(p.starting_position) LIKE LOWER($7) OR $8 = '')
             AND (LOWER(p.ending_position) LIKE LOWER($9) OR $10 = '')
-            AND (LOWER(p.language) LIKE LOWER($11) OR $12 = '')
+            AND (LOWER(p.starting_top_bottom::text) = LOWER($11) OR $12 = '')
+            AND (LOWER(p.ending_top_bottom::text) = LOWER($13) OR $14 = '')
+            AND (LOWER(p.gi_nogi) = LOWER($15) OR $16 = '')
+            AND (LOWER(p.practitioner) LIKE LOWER($17) OR $18 = '')
+            AND (LOWER(p.language) LIKE LOWER($19) OR $20 = '')
             AND (
               (
-                $13 = '' AND 
+                $21 = '' AND 
                 (
                   LOWER(p.public_status) = 'public' OR 
-                  (LOWER(p.public_status) = 'private' AND p.owner_name = $14)
+                  LOWER(p.public_status) = 'subscribers' OR
+                  (LOWER(p.public_status) = 'private' AND p.owner_name = $22)
                 )
               )
-              OR ($15 = 'public' AND LOWER(p.public_status) = 'public')
-              OR ($16 = 'private' AND LOWER(p.public_status) = 'private' AND p.owner_name = $17)
+              OR ($23 = 'public' AND LOWER(p.public_status) = 'public')
+              OR ($24 = 'private' AND LOWER(p.public_status) = 'private' AND p.owner_name = $25)
+              OR ($26 = 'subscribers' AND LOWER(p.public_status) = 'subscribers')
             )
           ORDER BY p.created_at ${sortOrder}
         `;
@@ -776,10 +795,15 @@ const handleSearch = async (event, db) => {
             `%${movementType}%`, movementType,
             `%${startingPosition}%`, startingPosition,
             `%${endingPosition}%`, endingPosition,
+            startingTopBottom, startingTopBottom,
+            endingTopBottom, endingTopBottom,
+            giNogi, giNogi,
+            `%${practitioner}%`, practitioner,
             `%${language}%`, language,
-            publicStatus, currentUser,  // Case 1: public or private posts if owned by currentUser
+            publicStatus, currentUser,  // Case 1: all posts (public/subscribers) or private posts if owned by currentUser
             publicStatus,               // Case 2: public posts only
-            publicStatus, currentUser   // Case 3: private posts if owned by currentUser
+            publicStatus, currentUser,  // Case 3: private posts if owned by currentUser
+            publicStatus                // Case 4: subscribers-only posts
         ];
 
         console.log("Executing query with params:", {
@@ -798,6 +822,10 @@ const handleSearch = async (event, db) => {
             video_platform: post.video_platform,
             title: post.title,
             username: post.username,
+            gi_nogi: post.gi_nogi,
+            practitioner: post.practitioner,
+            starting_top_bottom: post.starting_top_bottom,
+            ending_top_bottom: post.ending_top_bottom,
             belt: post.belt,
             academy: post.academy,
             avatar_url: post.avatar_url,
@@ -1311,7 +1339,7 @@ const handleEditProfile = async (event, db, user) => {
 // Handle New Post
 const handleNewPost = async (event, db, user) => {
     const { uploadMarkdownToS3 } = require('./s3-helper');
-    let { title, video_id, video_platform, movement_type, starting_position, ending_position, sequence_start_time, public_status, language, notes } = JSON.parse(event.body);
+    let { title, video_id, video_platform, movement_type, starting_position, ending_position, starting_top_bottom, ending_top_bottom, gi_nogi, practitioner, sequence_start_time, public_status, language, notes } = JSON.parse(event.body);
     
     // Generate a new UUIDv7 for the post (time-ordered)
     const id = uuidv7();
@@ -1323,6 +1351,10 @@ const handleNewPost = async (event, db, user) => {
         movement_type,
         starting_position,
         ending_position,
+        starting_top_bottom,
+        ending_top_bottom,
+        gi_nogi,
+        practitioner,
         sequence_start_time,
         public_status,
         language
@@ -1346,6 +1378,10 @@ const handleNewPost = async (event, db, user) => {
     movement_type = movement_type || 'General';
     starting_position = starting_position || 'Not Specified';
     ending_position = ending_position || 'Not Specified';
+    starting_top_bottom = starting_top_bottom || 'NEUTRAL';
+    ending_top_bottom = ending_top_bottom || 'NEUTRAL';
+    gi_nogi = gi_nogi || 'Gi';
+    practitioner = practitioner || null;
     sequence_start_time = sequence_start_time || '00:00:00';
     public_status = public_status || 'public';
     language = language || 'English';
@@ -1360,10 +1396,10 @@ const handleNewPost = async (event, db, user) => {
     }
 
     // Validate public_status is one of the allowed values
-    if (!['public', 'private'].includes(public_status)) {
+    if (!['public', 'private', 'subscribers'].includes(public_status)) {
         return {
             statusCode: 400,
-            body: JSON.stringify({ error: 'Public status must be either "public" or "private"' })
+            body: JSON.stringify({ error: 'Public status must be either "public", "private", or "subscribers"' })
         };
     }
 
@@ -1419,11 +1455,15 @@ const handleNewPost = async (event, db, user) => {
           movement_type,
           starting_position,
           ending_position,
+          starting_top_bottom,
+          ending_top_bottom,
+          gi_nogi,
+          practitioner,
           sequence_start_time,
           public_status,
           language,
           notes_path
-        ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       `;
         const values = [
             id, // Cast explicitly to UUID type
@@ -1434,6 +1474,10 @@ const handleNewPost = async (event, db, user) => {
             movement_type,
             starting_position,
             ending_position,
+            starting_top_bottom,
+            ending_top_bottom,
+            gi_nogi,
+            practitioner,
             sequence_start_time,
             public_status,
             language,
@@ -1470,7 +1514,7 @@ const handleNewPost = async (event, db, user) => {
 const handleEditPost = async (event, db, user) => {
     const { uploadMarkdownToS3, deleteMarkdownFromS3 } = require('./s3-helper');
     const postId = event.pathParameters.id;
-    const { title, video_id, video_platform, movement_type, starting_position, ending_position, sequence_start_time, public_status, language, notes } = JSON.parse(event.body);
+    const { title, video_id, video_platform, movement_type, starting_position, ending_position, starting_top_bottom, ending_top_bottom, gi_nogi, practitioner, sequence_start_time, public_status, language, notes } = JSON.parse(event.body);
 
     // Validate required fields
     if (!title || !video_id || !video_platform || !movement_type || !starting_position || !ending_position || !sequence_start_time || !public_status || !language) {
@@ -1490,10 +1534,10 @@ const handleEditPost = async (event, db, user) => {
     }
 
     // Validate public_status is one of the allowed values
-    if (!['public', 'private'].includes(public_status)) {
+    if (!['public', 'private', 'subscribers'].includes(public_status)) {
         return {
             statusCode: 400,
-            body: JSON.stringify({ error: 'Public status must be either "public" or "private"' })
+            body: JSON.stringify({ error: 'Public status must be either "public", "private", or "subscribers"' })
         };
     }
 
@@ -1574,11 +1618,15 @@ const handleEditPost = async (event, db, user) => {
           movement_type = $4,
           starting_position = $5,
           ending_position = $6,
-          sequence_start_time = $7,
-          public_status = $8,
-          language = $9,
-          notes_path = $10
-        WHERE id = $11 AND owner_name = $12
+          starting_top_bottom = $7,
+          ending_top_bottom = $8,
+          gi_nogi = $9,
+          practitioner = $10,
+          sequence_start_time = $11,
+          public_status = $12,
+          language = $13,
+          notes_path = $14
+        WHERE id = $15 AND owner_name = $16
       `;
 
         await db.execute(updateQuery, [
@@ -1588,6 +1636,10 @@ const handleEditPost = async (event, db, user) => {
             movement_type,
             starting_position,
             ending_position,
+            starting_top_bottom,
+            ending_top_bottom,
+            gi_nogi,
+            practitioner,
             sequence_start_time,
             public_status,
             language,
