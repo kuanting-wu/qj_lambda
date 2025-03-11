@@ -1322,6 +1322,23 @@ const handleNewPost = async (event, db, user) => {
         };
     }
 
+    // Validate language is one of the allowed values from the schema
+    const allowedLanguages = ['English', 'Japanese', 'Traditional Chinese'];
+    if (!allowedLanguages.includes(language)) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: `Language must be one of: ${allowedLanguages.join(', ')}` })
+        };
+    }
+
+    // Validate public_status is one of the allowed values
+    if (!['public', 'private'].includes(public_status)) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: 'Public status must be either "public" or "private"' })
+        };
+    }
+
     try {
         // First, get the username for the current user
         const [userResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [user.user_id]);
@@ -1413,6 +1430,23 @@ const handleEditPost = async (event, db, user) => {
         return {
             statusCode: 400,
             body: JSON.stringify({ error: 'Required fields are missing to update the post' })
+        };
+    }
+
+    // Validate language is one of the allowed values from the schema
+    const allowedLanguages = ['English', 'Japanese', 'Traditional Chinese'];
+    if (!allowedLanguages.includes(language)) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: `Language must be one of: ${allowedLanguages.join(', ')}` })
+        };
+    }
+
+    // Validate public_status is one of the allowed values
+    if (!['public', 'private'].includes(public_status)) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: 'Public status must be either "public" or "private"' })
         };
     }
 
