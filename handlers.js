@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
+const { uuidv7 } = require('uuidv7');
 const { generateAccessToken, generateRefreshToken } = require('./auth');
 const { sendEmail } = require('./email');
 const { verifyGoogleToken } = require('./google-auth');
@@ -65,7 +65,7 @@ const handleSignup = async (event, db) => {
         // Hash password with fewer rounds (8 instead of 10) for Lambda performance
         // This is still secure but faster in Lambda environments
         const hashedPassword = await bcrypt.hash(password, 8);
-        const verificationToken = uuidv4();
+        const verificationToken = uuidv7(); // Using UUIDv7 for all IDs for consistency
         const tokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // Token expires in 24 hours
         const tokenExpiryUTC = tokenExpiry.toISOString();
 
@@ -434,7 +434,7 @@ const handleResendVerification = async (event, db) => {
         }
         
         // Generate new verification token
-        const verificationToken = uuidv4();
+        const verificationToken = uuidv7();
         const tokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // Token expires in 24 hours
         const tokenExpiryUTC = tokenExpiry.toISOString();
         
@@ -500,8 +500,8 @@ const handleForgotPassword = async (event, db) => {
             };
         }
 
-        // Generate a unique reset token using uuid
-        const resetToken = uuidv4();
+        // Generate a unique reset token using uuidv7
+        const resetToken = uuidv7();
         const tokenExpiry = new Date(Date.now() + 1 * 60 * 60 * 1000); // Token expires in 1 hour
         const tokenExpiryUTC = tokenExpiry.toISOString(); // Convert expiry to UTC
 
@@ -1311,16 +1311,40 @@ const handleEditProfile = async (event, db, user) => {
 // Handle New Post
 const handleNewPost = async (event, db, user) => {
     const { uploadMarkdownToS3 } = require('./s3-helper');
-    const { title, video_id, video_platform, movement_type, starting_position, ending_position, sequence_start_time, public_status, language, notes } = JSON.parse(event.body);
-    const { id } = event.pathParameters; // Get the post ID from the URL path
+    let { title, video_id, video_platform, movement_type, starting_position, ending_position, sequence_start_time, public_status, language, notes } = JSON.parse(event.body);
+    
+    // Generate a new UUIDv7 for the post (time-ordered)
+    const id = uuidv7();
 
-    // Validate required fields
-    if (!title || !video_id || !video_platform || !movement_type || !starting_position || !ending_position || !sequence_start_time || !public_status || !language) {
+    console.log('Received new post request with data:', {
+        title,
+        video_id,
+        video_platform,
+        movement_type,
+        starting_position,
+        ending_position,
+        sequence_start_time,
+        public_status,
+        language
+    });
+    console.log('Generated server-side UUIDv7:', id);
+
+    // Validate and provide defaults for required fields
+    if (!video_id || !video_platform) {
         return {
             statusCode: 400,
-            body: JSON.stringify({ error: 'Required fields are missing to create a new post' })
+            body: JSON.stringify({ error: 'Video ID and platform are required' })
         };
     }
+
+    // Provide default values if missing
+    title = title || `Video ${video_id}`;
+    movement_type = movement_type || 'General';
+    starting_position = starting_position || 'Not Specified';
+    ending_position = ending_position || 'Not Specified';
+    sequence_start_time = sequence_start_time || '00:00:00';
+    public_status = public_status || 'public';
+    language = language || 'English';
 
     // Validate language is one of the allowed values from the schema
     const allowedLanguages = ['English', 'Japanese', 'Traditional Chinese'];
@@ -1336,6 +1360,14 @@ const handleNewPost = async (event, db, user) => {
         return {
             statusCode: 400,
             body: JSON.stringify({ error: 'Public status must be either "public" or "private"' })
+        };
+    }
+
+    // Validate time format
+    if (!/^\d{2}:\d{2}:\d{2}$/.test(sequence_start_time)) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: 'Sequence start time must be in HH:MM:SS format' })
         };
     }
 
@@ -1367,6 +1399,11 @@ const handleNewPost = async (event, db, user) => {
             }
         }
 
+        // Ensure title doesn't exceed 63 characters as defined in the schema
+        if (title.length > 63) {
+            title = title.substring(0, 60) + '...';
+        }
+
         // Insert the new post into the database with the updated schema
         const query = `
         INSERT INTO posts (
@@ -1382,10 +1419,10 @@ const handleNewPost = async (event, db, user) => {
           public_status,
           language,
           notes_path
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       `;
         const values = [
-            id,
+            id, // Cast explicitly to UUID type
             title,
             video_id,
             video_platform,
@@ -1401,6 +1438,8 @@ const handleNewPost = async (event, db, user) => {
 
         await db.execute(query, values);
 
+        console.log(`Post created successfully with ID: ${id}`);
+
         // Return success message
         return {
             statusCode: 201,
@@ -1414,7 +1453,11 @@ const handleNewPost = async (event, db, user) => {
         console.error('Error creating new post:', error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: 'Failed to create a new post', details: error.message })
+            body: JSON.stringify({ 
+                error: 'Failed to create a new post', 
+                details: error.message,
+                code: error.code
+            })
         };
     }
 };

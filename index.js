@@ -223,7 +223,7 @@ exports.handler = async (event) => {
             handlerPromise = handleRefreshToken(event, db);
           } else if (httpMethod === 'PUT' && path.startsWith('/editprofile/')) {
             handlerPromise = handleEditProfile(event, db, user);
-          } else if (httpMethod === 'POST' && path.startsWith('/newpost/')) {
+          } else if (httpMethod === 'POST' && path === '/newpost') {
             handlerPromise = handleNewPost(event, db, user);
           } else if (httpMethod === 'PUT' && path.startsWith('/editpost/')) {
             handlerPromise = handleEditPost(event, db, user);
