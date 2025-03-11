@@ -1327,6 +1327,10 @@ const handleNewPost = async (event, db, user) => {
         public_status,
         language
     });
+    console.log('Event path:', event.path);
+    console.log('Event HTTP method:', event.httpMethod);
+    console.log('Event path parameters:', event.pathParameters);
+    console.log('Event request context:', event.requestContext?.authorizer);
     console.log('Generated server-side UUIDv7:', id);
 
     // Validate and provide defaults for required fields

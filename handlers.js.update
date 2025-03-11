@@ -1,0 +1,166 @@
+// Updates for the handlers.js file to support the updated database schema
+// Replace the following sections in handlers.js:
+
+// 1. Update handleNewPost parsing to include new fields (around line 1314)
+let { 
+    title, 
+    video_id, 
+    video_platform, 
+    movement_type, 
+    starting_position, 
+    ending_position,
+    starting_top_bottom,
+    ending_top_bottom,
+    gi_nogi,
+    practitioner, 
+    sequence_start_time, 
+    public_status, 
+    language, 
+    notes 
+} = JSON.parse(event.body);
+
+// 2. Update the console.log statements (around line 1319)
+console.log('Received new post request with data:', {
+    title,
+    video_id,
+    video_platform,
+    movement_type,
+    starting_position,
+    ending_position,
+    starting_top_bottom,
+    ending_top_bottom,
+    gi_nogi,
+    practitioner,
+    sequence_start_time,
+    public_status,
+    language
+});
+
+// 3. Update default values section (around line 1345)
+title = title || `Video ${video_id}`;
+movement_type = movement_type || 'General';
+starting_position = starting_position || 'Not Specified';
+ending_position = ending_position || 'Not Specified';
+starting_top_bottom = starting_top_bottom || 'NEUTRAL';
+ending_top_bottom = ending_top_bottom || 'NEUTRAL';
+gi_nogi = gi_nogi || 'Gi';
+sequence_start_time = sequence_start_time || '00:00:00';
+public_status = public_status || 'public';
+language = language || 'English';
+
+// 4. Update public_status validation (around line 1363)
+if (!['public', 'private', 'subscribers'].includes(public_status)) {
+    return {
+        statusCode: 400,
+        body: JSON.stringify({ error: 'Public status must be either "public", "private", or "subscribers"' })
+    };
+}
+
+// 5. Update the INSERT query (around line 1412)
+const query = `
+INSERT INTO posts (
+  id,
+  title,
+  video_id,
+  video_platform,
+  owner_name,
+  movement_type,
+  starting_position,
+  ending_position,
+  starting_top_bottom,
+  ending_top_bottom,
+  gi_nogi,
+  practitioner,
+  sequence_start_time,
+  public_status,
+  language,
+  notes_path
+) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+`;
+
+// 6. Update the values array (around line 1428)
+const values = [
+    id, // Cast explicitly to UUID type
+    title,
+    video_id,
+    video_platform,
+    username, // Using username instead of user_id now
+    movement_type,
+    starting_position,
+    ending_position,
+    starting_top_bottom,
+    ending_top_bottom,
+    gi_nogi,
+    practitioner,
+    sequence_start_time,
+    public_status,
+    language,
+    notesPath
+];
+
+// 7. Update handleEditPost parsing (around line 1473)
+const { 
+    title, 
+    video_id, 
+    video_platform, 
+    movement_type, 
+    starting_position, 
+    ending_position,
+    starting_top_bottom,
+    ending_top_bottom,
+    gi_nogi,
+    practitioner, 
+    sequence_start_time, 
+    public_status, 
+    language, 
+    notes 
+} = JSON.parse(event.body);
+
+// 8. Update the validation in handleEditPost (around line 1493)
+if (!['public', 'private', 'subscribers'].includes(public_status)) {
+    return {
+        statusCode: 400,
+        body: JSON.stringify({ error: 'Public status must be either "public", "private", or "subscribers"' })
+    };
+}
+
+// 9. Update the UPDATE query (around line 1568)
+const updateQuery = `
+UPDATE posts
+SET
+  title = $1,
+  video_id = $2,
+  video_platform = $3,
+  movement_type = $4,
+  starting_position = $5,
+  ending_position = $6,
+  starting_top_bottom = $7,
+  ending_top_bottom = $8,
+  gi_nogi = $9,
+  practitioner = $10,
+  sequence_start_time = $11,
+  public_status = $12,
+  language = $13,
+  notes_path = $14
+WHERE id = $15 AND owner_name = $16
+`;
+
+// 10. Update the values array for UPDATE (around line 1584)
+await db.execute(updateQuery, [
+    title,
+    video_id,
+    video_platform,
+    movement_type,
+    starting_position,
+    ending_position,
+    starting_top_bottom,
+    ending_top_bottom,
+    gi_nogi,
+    practitioner,
+    sequence_start_time,
+    public_status,
+    language,
+    newNotesPath,
+    postId,
+    username
+]);
