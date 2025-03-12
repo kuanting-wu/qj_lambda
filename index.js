@@ -45,8 +45,12 @@ const addCorsHeaders = (response, event) => {
   // List of allowed origins to match API Gateway config
   const allowedOrigins = [
     'http://localhost:8080',
+    'http://localhost:8081',
+    'http://localhost:3000',
     'https://quantifyjiujitsu.com',
     'https://www.quantifyjiujitsu.com',
+    'https://dev.quantifyjiujitsu.com',
+    'https://staging.quantifyjiujitsu.com',
     'https://api-dev.quantifyjiujitsu.com',
     'https://api.quantifyjiujitsu.com',
     'https://api-staging.quantifyjiujitsu.com'
@@ -167,6 +171,7 @@ exports.handler = async (event) => {
       const allowedOrigins = [
         'http://localhost:8080',
         'http://localhost:8081',
+        'http://localhost:3000',
         'https://quantifyjiujitsu.com',
         'https://www.quantifyjiujitsu.com',
         'https://dev.quantifyjiujitsu.com',
