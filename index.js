@@ -37,6 +37,38 @@ const withTimeout = (promise, timeoutMs = 15000, errorMessage = 'Operation timed
   });
 };
 
+// Utility function to add CORS headers to all responses
+const addCorsHeaders = (response, event) => {
+  // Get the origin from the request headers
+  const origin = event.headers?.origin || event.headers?.Origin || 'http://localhost:8080';
+
+  // List of allowed origins to match API Gateway config
+  const allowedOrigins = [
+    'http://localhost:8080',
+    'https://quantifyjiujitsu.com',
+    'https://www.quantifyjiujitsu.com',
+    'https://api-dev.quantifyjiujitsu.com',
+    'https://api.quantifyjiujitsu.com',
+    'https://api-staging.quantifyjiujitsu.com'
+  ];
+
+  // Set appropriate origin - if the request origin is allowed, use it; otherwise use a default
+  const responseOrigin = allowedOrigins.includes(origin) ? origin : 'https://quantifyjiujitsu.com';
+
+  // Add CORS headers to the response
+  return {
+    ...response,
+    headers: {
+      ...response.headers,
+      "Access-Control-Allow-Origin": responseOrigin,
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key, X-Amz-Date, X-Amz-Security-Token, Accept, Origin, Referer, User-Agent",
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Max-Age": "86400"
+    }
+  };
+};
+
 exports.handler = async (event) => {
   try {
     console.log("Lambda invoked with event:", JSON.stringify(event));
@@ -154,36 +186,36 @@ exports.handler = async (event) => {
       
       // Check if this is a missing environment variable error
       if (dbError.message && dbError.message.includes("Missing required environment variables")) {
-        return {
+        return addCorsHeaders({
           statusCode: 500,
           body: JSON.stringify({ 
             error: "Lambda configuration error", 
             details: "The Lambda function is missing required database configuration environment variables",
             message: dbError.message
           })
-        };
+        }, event);
       }
       
       // Check if this is a timeout error
       if (dbError.message && (dbError.message.includes("timed out") || dbError.code === 'ETIMEDOUT')) {
-        return {
+        return addCorsHeaders({
           statusCode: 503, // Service Unavailable
           body: JSON.stringify({ 
             error: "Database service temporarily unavailable", 
             details: "The database connection attempt timed out. Please try again later.",
             code: dbError.code || "TIMEOUT"
           })
-        };
+        }, event);
       }
       
-      return {
+      return addCorsHeaders({
         statusCode: 500,
         body: JSON.stringify({ 
           error: "Database connection failed", 
           details: dbError.message,
           code: dbError.code || "UNKNOWN"
         })
-      };
+      }, event);
     }
 
     let response;
@@ -230,50 +262,51 @@ exports.handler = async (event) => {
           } else if (httpMethod === 'DELETE' && path.startsWith('/deletepost/')) {
             handlerPromise = handleDeletePost(event, db, user);
           } else {
-            response = { statusCode: 404, body: JSON.stringify({ error: 'Route not found' }) };
+            response = addCorsHeaders({ statusCode: 404, body: JSON.stringify({ error: 'Route not found' }) }, event);
           }
         } catch (authError) {
           console.error("Authentication error:", authError);
-          response = { 
+          response = addCorsHeaders({ 
             statusCode: 401, 
             body: JSON.stringify({ 
               error: 'Authentication failed', 
               details: authError.message 
             }) 
-          };
+          }, event);
         }
       }
 
       // Execute handler with timeout if a valid handler was found
       if (handlerPromise && !response) {
         // Use longer timeout (14 seconds) for handler execution
-        response = await withTimeout(
+        const handlerResponse = await withTimeout(
           handlerPromise,
           14000,
           "Handler operation timed out - the operation might be too resource-intensive for Lambda"
         );
+        response = addCorsHeaders(handlerResponse, event);
       }
     } catch (handlerError) {
       console.error("Handler error:", handlerError);
-      response = { 
+      response = addCorsHeaders({ 
         statusCode: 500, 
         body: JSON.stringify({ 
           error: 'Request processing error', 
           details: handlerError.message 
         }) 
-      };
+      }, event);
     }
 
     return response;
   } catch (error) {
     console.error("Lambda error:", error);
-    return {
+    return addCorsHeaders({
       statusCode: 500,
       body: JSON.stringify({ 
         error: 'Server error',
         details: error.message,
         stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
       })
-    };
+    }, event);
   }
 };
