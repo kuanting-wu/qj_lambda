@@ -318,6 +318,40 @@ exports.handler = async (event) => {
       }, event);
     }
 
+    // Always add CORS headers to every response before returning
+    // Make sure we have a headers object if not already present
+    if (!response.headers) {
+      response.headers = {};
+    }
+    
+    // Get the origin from the request headers
+    const origin = event.headers?.origin || event.headers?.Origin || 'http://localhost:8080';
+    
+    // List of allowed origins
+    const allowedOrigins = [
+      'http://localhost:8080',
+      'http://localhost:8081',
+      'https://quantifyjiujitsu.com',
+      'https://www.quantifyjiujitsu.com',
+      'https://dev.quantifyjiujitsu.com',
+      'https://staging.quantifyjiujitsu.com',
+      'https://api-dev.quantifyjiujitsu.com',
+      'https://api.quantifyjiujitsu.com',
+      'https://api-staging.quantifyjiujitsu.com'
+    ];
+    
+    // Set appropriate origin - if the request origin is allowed, use it; otherwise use a default
+    const responseOrigin = allowedOrigins.includes(origin) ? origin : 'https://quantifyjiujitsu.com';
+    
+    // Add CORS headers to the response
+    response.headers['Access-Control-Allow-Origin'] = responseOrigin;
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH';
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Api-Key, X-Amz-Date, X-Amz-Security-Token, Accept, Origin, Referer, User-Agent';
+    response.headers['Access-Control-Allow-Credentials'] = 'true';
+    response.headers['Access-Control-Max-Age'] = '86400';
+
+    console.log("Response with CORS headers:", JSON.stringify(response));
+    
     return response;
   } catch (error) {
     console.error("Lambda error:", error);

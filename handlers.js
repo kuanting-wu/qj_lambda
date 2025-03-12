@@ -5,6 +5,44 @@ const { generateAccessToken, generateRefreshToken } = require('./auth');
 const { sendEmail } = require('./email');
 const { verifyGoogleToken } = require('./google-auth');
 
+// Helper function to add CORS headers to all responses
+const corsHeaders = (event) => {
+    const origin = event.headers?.origin || event.headers?.Origin || 'http://localhost:8080';
+    
+    // Define allowed origins
+    const allowedOrigins = [
+        'http://localhost:8080',
+        'http://localhost:8081',
+        'https://quantifyjiujitsu.com',
+        'https://www.quantifyjiujitsu.com',
+        'https://dev.quantifyjiujitsu.com',
+        'https://staging.quantifyjiujitsu.com',
+        'https://api-dev.quantifyjiujitsu.com',
+        'https://api.quantifyjiujitsu.com',
+        'https://api-staging.quantifyjiujitsu.com'
+    ];
+    
+    // Use the origin if it's in the allowed list, otherwise use a default
+    const responseOrigin = allowedOrigins.includes(origin) ? origin : 'https://quantifyjiujitsu.com';
+    
+    return {
+        'Access-Control-Allow-Origin': responseOrigin,
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, X-Amz-Date, X-Amz-Security-Token, Accept, Origin, Referer, User-Agent',
+        'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Max-Age': '86400'
+    };
+};
+
+// Helper function to wrap all responses with CORS headers
+const corsResponse = (event, statusCode, body) => {
+    return {
+        statusCode,
+        headers: corsHeaders(event),
+        body: JSON.stringify(body)
+    };
+};
+
 // Handle Signup
 const handleSignup = async (event, db) => {
     let username, email, password;
@@ -1514,31 +1552,38 @@ const handleNewPost = async (event, db, user) => {
 const handleEditPost = async (event, db, user) => {
     const { uploadMarkdownToS3, deleteMarkdownFromS3 } = require('./s3-helper');
     const postId = event.pathParameters.id;
-    const { title, video_id, video_platform, movement_type, starting_position, ending_position, starting_top_bottom, ending_top_bottom, gi_nogi, practitioner, sequence_start_time, public_status, language, notes } = JSON.parse(event.body);
+    
+    console.log("EditPost handler called for postId:", postId);
+    console.log("Event headers:", JSON.stringify(event.headers));
+    
+    // For OPTIONS requests, return immediately with CORS headers
+    if (event.httpMethod === 'OPTIONS') {
+        console.log("Handling OPTIONS request for EditPost");
+        return {
+            statusCode: 204,
+            headers: corsHeaders(event),
+            body: ''
+        };
+    }
+    
+    // Parse the request body
+    const parsedBody = JSON.parse(event.body);
+    const { title, video_id, video_platform, movement_type, starting_position, ending_position, starting_top_bottom, ending_top_bottom, gi_nogi, practitioner, sequence_start_time, public_status, language, notes } = parsedBody;
 
     // Validate required fields
     if (!title || !video_id || !video_platform || !movement_type || !starting_position || !ending_position || !sequence_start_time || !public_status || !language) {
-        return {
-            statusCode: 400,
-            body: JSON.stringify({ error: 'Required fields are missing to update the post' })
-        };
+        return corsResponse(event, 400, { error: 'Required fields are missing to update the post' });
     }
 
     // Validate language is one of the allowed values from the schema
     const allowedLanguages = ['English', 'Japanese', 'Traditional Chinese'];
     if (!allowedLanguages.includes(language)) {
-        return {
-            statusCode: 400,
-            body: JSON.stringify({ error: `Language must be one of: ${allowedLanguages.join(', ')}` })
-        };
+        return corsResponse(event, 400, { error: `Language must be one of: ${allowedLanguages.join(', ')}` });
     }
 
     // Validate public_status is one of the allowed values
     if (!['public', 'private', 'subscribers'].includes(public_status)) {
-        return {
-            statusCode: 400,
-            body: JSON.stringify({ error: 'Public status must be either "public", "private", or "subscribers"' })
-        };
+        return corsResponse(event, 400, { error: 'Public status must be either "public", "private", or "subscribers"' });
     }
 
     try {
