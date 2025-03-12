@@ -161,11 +161,32 @@ exports.handler = async (event) => {
     
     const { httpMethod, path } = event;
 
-    // Handle CORS preflight requests - now handled by API Gateway
+    // Handle CORS preflight requests - must return proper CORS headers
     if (httpMethod === 'OPTIONS') {
+      const origin = event.headers?.origin || event.headers?.Origin || 'http://localhost:8080';
+      const allowedOrigins = [
+        'http://localhost:8080',
+        'http://localhost:8081',
+        'https://quantifyjiujitsu.com',
+        'https://www.quantifyjiujitsu.com',
+        'https://dev.quantifyjiujitsu.com',
+        'https://staging.quantifyjiujitsu.com',
+        'https://api-dev.quantifyjiujitsu.com',
+        'https://api.quantifyjiujitsu.com',
+        'https://api-staging.quantifyjiujitsu.com'
+      ];
+      const responseOrigin = allowedOrigins.includes(origin) ? origin : 'https://quantifyjiujitsu.com';
+      
       return {
-        statusCode: 200,
-        body: JSON.stringify({ message: 'CORS preflight response' })
+        statusCode: 204, // No content is more appropriate for OPTIONS
+        headers: {
+          "Access-Control-Allow-Origin": responseOrigin,
+          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key, X-Amz-Date, X-Amz-Security-Token, Accept, Origin, Referer, User-Agent",
+          "Access-Control-Allow-Credentials": "true",
+          "Access-Control-Max-Age": "86400"
+        },
+        body: "" // Empty body for OPTIONS response
       };
     }
 
