@@ -780,7 +780,17 @@ const handleSearch = async (event, db) => {
     console.log("Current user context:", { currentUser, currentUserId });
 
     try {
-        // Updated query to work with the new schema (owner_name instead of owner_id)
+        // First, if postBy (username) parameter is provided, we need to find the corresponding user_id
+        let ownerUserId = null;
+        let usernameFilter = '';
+        
+        if (postBy) {
+            // Use the username directly as a filter for the view
+            usernameFilter = postBy;
+            console.log(`Searching for posts by username: ${usernameFilter}`);
+        }
+
+        // Updated query to use the posts_with_owner view
         const query = `
           SELECT 
             p.id,
@@ -792,13 +802,13 @@ const handleSearch = async (event, db) => {
             p.practitioner,
             p.starting_top_bottom,
             p.ending_top_bottom,
-            pr.belt,
-            pr.academy,
-            pr.avatar_url,
+            p.belt,
+            p.academy,
+            p.avatar_url,
             p.movement_type,
             p.created_at
-          FROM posts p
-          JOIN profiles pr ON p.owner_name = pr.username
+          FROM 
+            posts_with_owner p
           WHERE 1=1
             AND (LOWER(p.title) LIKE LOWER($1) OR $2 = '')
             AND (LOWER(p.owner_name) = LOWER($3) OR $4 = '')
@@ -816,20 +826,20 @@ const handleSearch = async (event, db) => {
                 (
                   LOWER(p.public_status) = 'public' OR 
                   LOWER(p.public_status) = 'subscribers' OR
-                  (LOWER(p.public_status) = 'private' AND p.owner_name = $22)
+                  (LOWER(p.public_status) = 'private' AND p.owner_id = $22::bigint)
                 )
               )
               OR ($23 = 'public' AND LOWER(p.public_status) = 'public')
-              OR ($24 = 'private' AND LOWER(p.public_status) = 'private' AND p.owner_name = $25)
+              OR ($24 = 'private' AND LOWER(p.public_status) = 'private' AND p.owner_id = $25::bigint)
               OR ($26 = 'subscribers' AND LOWER(p.public_status) = 'subscribers')
             )
           ORDER BY p.created_at ${sortOrder}
         `;
 
-        // Prepare query parameters - using currentUser instead of currentUserId for owner_name comparison
+        // Prepare query parameters - using the posts_with_owner view which provides owner_name
         const queryParams = [
             `%${search}%`, search,
-            postBy, postBy, // Exact match for owner_name
+            usernameFilter, usernameFilter, // Use the username for filtering
             `%${movementType}%`, movementType,
             `%${startingPosition}%`, startingPosition,
             `%${endingPosition}%`, endingPosition,
@@ -838,10 +848,10 @@ const handleSearch = async (event, db) => {
             giNogi, giNogi,
             `%${practitioner}%`, practitioner,
             `%${language}%`, language,
-            publicStatus, currentUser,  // Case 1: all posts (public/subscribers) or private posts if owned by currentUser
-            publicStatus,               // Case 2: public posts only
-            publicStatus, currentUser,  // Case 3: private posts if owned by currentUser
-            publicStatus                // Case 4: subscribers-only posts
+            publicStatus, currentUserId || 0,  // Use user_id for permission checks
+            publicStatus,               
+            publicStatus, currentUserId || 0,  
+            publicStatus                
         ];
 
         console.log("Executing query with params:", {
