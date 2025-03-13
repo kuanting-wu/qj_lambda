@@ -33,87 +33,142 @@ const handleSearch = async (event, db) => {
     console.log("Current user context:", { currentUser, currentUserId });
 
     try {
-        // Use username directly for filtering with the posts_with_owner view
-        let usernameFilter = '';
+        // If postBy (username) parameter is provided, find the corresponding user_id first
+        let ownerUserId = null;
         
         if (postBy) {
-            usernameFilter = postBy;
-            console.log(`Searching for posts by username: ${usernameFilter}`);
+            const [userResult] = await db.execute(
+                'SELECT user_id FROM profiles WHERE username = $1',
+                [postBy]
+            );
+            
+            if (userResult.length > 0) {
+                ownerUserId = userResult[0].user_id;
+                console.log(`Found user_id ${ownerUserId} for username "${postBy}"`);
+            } else {
+                console.log(`No user found with username "${postBy}"`);
+                // If no user found with that username, return empty results
+                return {
+                    statusCode: 200,
+                    body: JSON.stringify({
+                        posts: [],
+                        count: 0
+                    })
+                };
+            }
         }
 
-        // Updated query to use the posts_with_owner view
+        // Query using a join between posts and profiles tables
         const query = `
           SELECT 
             p.id,
             p.video_id,
             p.video_platform,
             p.title,
-            p.owner_name as username,
+            pr.username,  -- Get username from profiles
             p.gi_nogi,
             p.practitioner,
             p.starting_top_bottom,
             p.ending_top_bottom,
-            p.belt,
-            p.academy,
-            p.avatar_url,
+            pr.belt,
+            pr.academy,
+            pr.avatar_url,
             p.movement_type,
             p.created_at
           FROM 
-            posts_with_owner p
+            posts p
+          JOIN 
+            profiles pr ON p.owner_id = pr.user_id
           WHERE 1=1
-            AND (LOWER(p.title) LIKE LOWER($1) OR $2 = '')
-            AND (LOWER(p.owner_name) = LOWER($3) OR $4 = '')
-            AND (LOWER(p.movement_type) LIKE LOWER($5) OR $6 = '')
-            AND (LOWER(p.starting_position) LIKE LOWER($7) OR $8 = '')
-            AND (LOWER(p.ending_position) LIKE LOWER($9) OR $10 = '')
-            AND (LOWER(p.starting_top_bottom::text) = LOWER($11) OR $12 = '')
-            AND (LOWER(p.ending_top_bottom::text) = LOWER($13) OR $14 = '')
-            AND (LOWER(p.gi_nogi) = LOWER($15) OR $16 = '')
-            AND (LOWER(p.practitioner) LIKE LOWER($17) OR $18 = '')
-            AND (LOWER(p.language) LIKE LOWER($19) OR $20 = '')
-            AND (
-              (
-                $21 = '' AND 
-                (
-                  LOWER(p.public_status) = 'public' OR 
-                  LOWER(p.public_status) = 'subscribers' OR
-                  (LOWER(p.public_status) = 'private' AND p.owner_id = $22::bigint)
-                )
-              )
-              OR ($23 = 'public' AND LOWER(p.public_status) = 'public')
-              OR ($24 = 'private' AND LOWER(p.public_status) = 'private' AND p.owner_id = $25::bigint)
-              OR ($26 = 'subscribers' AND LOWER(p.public_status) = 'subscribers')
-            )
+            ${search ? 'AND (LOWER(p.title) LIKE LOWER($1) OR LOWER(p.practitioner) LIKE LOWER($1))' : ''}
+            ${ownerUserId ? 'AND p.owner_id = $2' : ''}
+            ${movementType ? `AND LOWER(p.movement_type) LIKE LOWER($${ownerUserId ? 3 : 2})` : ''}
+            ${startingPosition ? `AND LOWER(p.starting_position) LIKE LOWER($${ownerUserId ? 4 : 3})` : ''}
+            ${endingPosition ? `AND LOWER(p.ending_position) LIKE LOWER($${ownerUserId ? 5 : 4})` : ''}
+            ${startingTopBottom ? `AND LOWER(p.starting_top_bottom::text) = LOWER($${ownerUserId ? 6 : 5})` : ''}
+            ${endingTopBottom ? `AND LOWER(p.ending_top_bottom::text) = LOWER($${ownerUserId ? 7 : 6})` : ''}
+            ${giNogi ? `AND LOWER(p.gi_nogi) = LOWER($${ownerUserId ? 8 : 7})` : ''}
+            ${practitioner ? `AND LOWER(p.practitioner) LIKE LOWER($${ownerUserId ? 9 : 8})` : ''}
+            ${language ? `AND LOWER(p.language) LIKE LOWER($${ownerUserId ? 10 : 9})` : ''}
+            ${publicStatus ? `AND LOWER(p.public_status) = LOWER($${ownerUserId ? 11 : 10})` : ''}
+            ${!publicStatus ? `AND (
+              LOWER(p.public_status) = 'public' OR 
+              LOWER(p.public_status) = 'subscribers' OR
+              (LOWER(p.public_status) = 'private' AND p.owner_id = $${ownerUserId ? 12 : 11})
+            )` : ''}
           ORDER BY p.created_at ${sortOrder}
           LIMIT 100
         `;
 
         // Prepare query parameters
-        const queryParams = [
-            `%${search}%`, search,
-            usernameFilter, usernameFilter, // Use the username for filtering directly
-            `%${movementType}%`, movementType,
-            `%${startingPosition}%`, startingPosition,
-            `%${endingPosition}%`, endingPosition,
-            startingTopBottom, startingTopBottom,
-            endingTopBottom, endingTopBottom,
-            giNogi, giNogi,
-            `%${practitioner}%`, practitioner,
-            `%${language}%`, language,
-            publicStatus, currentUserId || 0,  // Use user_id for permission checks
-            publicStatus,               
-            publicStatus, currentUserId || 0,  
-            publicStatus                
-        ];
+        const params = [];
+        let paramIndex = 1;
 
-        console.log("Executing query with params:", {
-            query: query.replace(/\s+/g, ' ').trim(),
-            parameters: queryParams
-        });
+        if (search) {
+            params.push(`%${search}%`);
+            paramIndex++;
+        }
+        
+        if (ownerUserId) {
+            params.push(ownerUserId);
+            paramIndex++;
+        }
+        
+        if (movementType) {
+            params.push(`%${movementType}%`);
+            paramIndex++;
+        }
+        
+        if (startingPosition) {
+            params.push(`%${startingPosition}%`);
+            paramIndex++;
+        }
+        
+        if (endingPosition) {
+            params.push(`%${endingPosition}%`);
+            paramIndex++;
+        }
+        
+        if (startingTopBottom) {
+            params.push(startingTopBottom);
+            paramIndex++;
+        }
+        
+        if (endingTopBottom) {
+            params.push(endingTopBottom);
+            paramIndex++;
+        }
+        
+        if (giNogi) {
+            params.push(giNogi);
+            paramIndex++;
+        }
+        
+        if (practitioner) {
+            params.push(`%${practitioner}%`);
+            paramIndex++;
+        }
+        
+        if (language) {
+            params.push(`%${language}%`);
+            paramIndex++;
+        }
+        
+        if (publicStatus) {
+            params.push(publicStatus);
+            paramIndex++;
+        }
+        
+        // Add current user ID for private post access check if needed
+        if (!publicStatus) {
+            params.push(currentUserId || 0);
+        }
 
+        console.log("Executing search query with parameters:", params);
+        
         // Execute the query
-        const [results] = await db.execute(query, queryParams);
-        console.log(`Query returned ${results.length} results`);
+        const [results] = await db.execute(query, params);
+        console.log(`Found ${results.length} results`);
 
         // Format the results
         const formattedResults = results.map(post => ({
