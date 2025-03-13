@@ -232,3 +232,5 @@ const handleEditProfile = async (event, db, user) => {
         };
     }
 };
+
+module.exports = handleEditProfile;
