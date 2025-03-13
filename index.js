@@ -19,6 +19,9 @@ const {
   handleDeletePost,
 } = require('./handlers');
 
+// Import the avatar upload handler
+const handleUploadAvatar = require('./updates/handle_upload_avatar');
+
 const {
   createGamePlan,
   getGamePlans,
@@ -191,6 +194,8 @@ exports.handler = async (event) => {
             handlerPromise = handleEditPost(event, db, user);
           } else if (httpMethod === 'DELETE' && path.startsWith('/deletepost/')) {
             handlerPromise = handleDeletePost(event, db, user);
+          } else if (httpMethod === 'POST' && path === '/avatar') {
+            handlerPromise = handleUploadAvatar(event, db, user);
           } 
           // Game Plan routes
           else if (httpMethod === 'GET' && path === '/gameplans') {

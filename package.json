@@ -12,10 +12,12 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.750.0",
     "@aws-sdk/client-ses": "^3.750.0",
+    "aws-sdk": "^2.1528.0",
     "bcryptjs": "^3.0.2",
     "google-auth-library": "^9.2.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.3",
+    "sharp": "^0.33.1",
     "uuid": "^11.1.0",
     "uuidv7": "^1.0.2"
   }

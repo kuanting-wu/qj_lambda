@@ -846,77 +846,60 @@ const handleSearch = async (event, db) => {
           ORDER BY p.created_at ${sortOrder}
         `;
 
-        // Prepare query parameters
+        // Simplified approach: build parameters more directly
         const params = [];
-        let paramIndex = 1;
-
-        if (search) {
-            params.push(`%${search}%`);
-            paramIndex++;
-        }
         
+        // Always add the owner user ID if it exists (position $1 or $2)
         if (ownerUserId) {
             params.push(ownerUserId);
-            paramIndex++;
         }
         
-        if (movementType) {
-            params.push(`%${movementType}%`);
-            paramIndex++;
-        }
+        // Always add the current user ID for permission checks
+        params.push(currentUserId || 0);
         
-        if (startingPosition) {
-            params.push(`%${startingPosition}%`);
-            paramIndex++;
-        }
+        // Log simplified query information
+        console.log(`Using search parameters: search=${search}, ownerUserId=${ownerUserId}, currentUserId=${currentUserId || 0}`);
         
-        if (endingPosition) {
-            params.push(`%${endingPosition}%`);
-            paramIndex++;
-        }
+        // Build a simplified query that fixes the parameter positioning issue
+        const simplifiedQuery = `
+          SELECT 
+            p.id,
+            p.video_id,
+            p.video_platform,
+            p.title,
+            pr.username,
+            p.gi_nogi,
+            p.practitioner,
+            p.starting_top_bottom,
+            p.ending_top_bottom,
+            pr.belt,
+            pr.academy,
+            pr.avatar_url,
+            p.movement_type,
+            p.created_at
+          FROM 
+            posts p
+          JOIN 
+            profiles pr ON p.owner_id = pr.user_id
+          WHERE 1=1
+            ${ownerUserId ? 'AND p.owner_id = $1' : ''}
+            AND (
+              p.public_status = 'public' OR 
+              p.public_status = 'subscribers' OR
+              (p.public_status = 'private' AND p.owner_id = $${ownerUserId ? 2 : 1})
+            )
+          ORDER BY p.created_at ${sortOrder}
+        `;
         
-        if (startingTopBottom) {
-            params.push(startingTopBottom);
-            paramIndex++;
-        }
-        
-        if (endingTopBottom) {
-            params.push(endingTopBottom);
-            paramIndex++;
-        }
-        
-        if (giNogi) {
-            params.push(giNogi);
-            paramIndex++;
-        }
-        
-        if (practitioner) {
-            params.push(`%${practitioner}%`);
-            paramIndex++;
-        }
-        
-        if (language) {
-            params.push(`%${language}%`);
-            paramIndex++;
-        }
-        
-        if (publicStatus) {
-            params.push(publicStatus);
-            paramIndex++;
-        }
-        
-        // Add current user ID for private post access check if needed
-        if (!publicStatus) {
-            params.push(currentUserId || 0);
-        }
+        console.log("Using simplified query:", simplifiedQuery);
 
-        console.log("Executing query with params:", {
-            query: query.replace(/\s+/g, ' ').trim(),
+        console.log("Executing simplified query with params:", {
+            query: simplifiedQuery.replace(/\s+/g, ' ').trim(),
             parameters: params
         });
 
-        // Execute the query
-        const [results] = await db.execute(query, params);
+        // Execute the simplified query
+        const [results] = await db.execute(simplifiedQuery, params);
         console.log(`Query returned ${results.length} results`);
 
         // Format the results

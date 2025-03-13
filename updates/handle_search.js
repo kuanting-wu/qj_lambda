@@ -58,14 +58,14 @@ const handleSearch = async (event, db) => {
             }
         }
 
-        // Query using a join between posts and profiles tables
-        const query = `
+        // Simplified query approach
+        const simplifiedQuery = `
           SELECT 
             p.id,
             p.video_id,
             p.video_platform,
             p.title,
-            pr.username,  -- Get username from profiles
+            pr.username,
             p.gi_nogi,
             p.practitioner,
             p.starting_top_bottom,
@@ -80,94 +80,34 @@ const handleSearch = async (event, db) => {
           JOIN 
             profiles pr ON p.owner_id = pr.user_id
           WHERE 1=1
-            ${search ? 'AND (LOWER(p.title) LIKE LOWER($1) OR LOWER(p.practitioner) LIKE LOWER($1))' : ''}
-            ${ownerUserId ? 'AND p.owner_id = $2' : ''}
-            ${movementType ? `AND LOWER(p.movement_type) LIKE LOWER($${ownerUserId ? 3 : 2})` : ''}
-            ${startingPosition ? `AND LOWER(p.starting_position) LIKE LOWER($${ownerUserId ? 4 : 3})` : ''}
-            ${endingPosition ? `AND LOWER(p.ending_position) LIKE LOWER($${ownerUserId ? 5 : 4})` : ''}
-            ${startingTopBottom ? `AND LOWER(p.starting_top_bottom::text) = LOWER($${ownerUserId ? 6 : 5})` : ''}
-            ${endingTopBottom ? `AND LOWER(p.ending_top_bottom::text) = LOWER($${ownerUserId ? 7 : 6})` : ''}
-            ${giNogi ? `AND LOWER(p.gi_nogi) = LOWER($${ownerUserId ? 8 : 7})` : ''}
-            ${practitioner ? `AND LOWER(p.practitioner) LIKE LOWER($${ownerUserId ? 9 : 8})` : ''}
-            ${language ? `AND LOWER(p.language) LIKE LOWER($${ownerUserId ? 10 : 9})` : ''}
-            ${publicStatus ? `AND LOWER(p.public_status) = LOWER($${ownerUserId ? 11 : 10})` : ''}
-            ${!publicStatus ? `AND (
-              LOWER(p.public_status) = 'public' OR 
-              LOWER(p.public_status) = 'subscribers' OR
-              (LOWER(p.public_status) = 'private' AND p.owner_id = $${ownerUserId ? 12 : 11})
-            )` : ''}
+            ${ownerUserId ? 'AND p.owner_id = $1' : ''}
+            AND (
+              p.public_status = 'public' OR 
+              p.public_status = 'subscribers' OR
+              (p.public_status = 'private' AND p.owner_id = $${ownerUserId ? 2 : 1})
+            )
           ORDER BY p.created_at ${sortOrder}
           LIMIT 100
         `;
 
-        // Prepare query parameters
+        // Simplified parameters
         const params = [];
-        let paramIndex = 1;
-
-        if (search) {
-            params.push(`%${search}%`);
-            paramIndex++;
-        }
         
+        // Always add the owner user ID if it exists
         if (ownerUserId) {
             params.push(ownerUserId);
-            paramIndex++;
         }
         
-        if (movementType) {
-            params.push(`%${movementType}%`);
-            paramIndex++;
-        }
+        // Always add the current user ID for permission checks
+        params.push(currentUserId || 0);
         
-        if (startingPosition) {
-            params.push(`%${startingPosition}%`);
-            paramIndex++;
-        }
-        
-        if (endingPosition) {
-            params.push(`%${endingPosition}%`);
-            paramIndex++;
-        }
-        
-        if (startingTopBottom) {
-            params.push(startingTopBottom);
-            paramIndex++;
-        }
-        
-        if (endingTopBottom) {
-            params.push(endingTopBottom);
-            paramIndex++;
-        }
-        
-        if (giNogi) {
-            params.push(giNogi);
-            paramIndex++;
-        }
-        
-        if (practitioner) {
-            params.push(`%${practitioner}%`);
-            paramIndex++;
-        }
-        
-        if (language) {
-            params.push(`%${language}%`);
-            paramIndex++;
-        }
-        
-        if (publicStatus) {
-            params.push(publicStatus);
-            paramIndex++;
-        }
-        
-        // Add current user ID for private post access check if needed
-        if (!publicStatus) {
-            params.push(currentUserId || 0);
-        }
-
+        // Log parameters for debugging
+        console.log(`Using search parameters: ownerUserId=${ownerUserId}, currentUserId=${currentUserId || 0}`);
+        console.log("Executing simplified query:", simplifiedQuery);
         console.log("Executing search query with parameters:", params);
         
-        // Execute the query
-        const [results] = await db.execute(query, params);
+        // Execute the simplified query
+        const [results] = await db.execute(simplifiedQuery, params);
         console.log(`Found ${results.length} results`);
 
         // Format the results
