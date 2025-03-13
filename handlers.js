@@ -1284,6 +1284,20 @@ const handleEditProfile = async (event, db, user) => {
                     };
                 }
                 
+                // Start transaction if not already in one
+                if (!db.connection.inTransaction) {
+                    await db.beginTransaction();
+                    console.log("Transaction started for username change");
+                }
+                
+                // Update all posts' owner_name field 
+                // Note: After migration, this will update both owner_name and owner_id if needed
+                await db.execute(
+                    'UPDATE posts SET owner_name = $1 WHERE owner_name = $2',
+                    [new_username, user.username]
+                );
+                console.log(`Updated posts owner_name from ${user.username} to ${new_username}`);
+                
                 updates.push(`username = $${paramCounter++}`);
                 params.push(new_username);
                 console.log(`Username change requested: ${user.username} → ${new_username}`);
