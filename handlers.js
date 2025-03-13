@@ -303,22 +303,25 @@ const handleSignin = async (event, db) => {
 
         const user = users[0];
 
-        // Get just the username for the token
-        const [profileResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [user.id]);
+        // Get the username and avatar_url for the token
+        const [profileResult] = await db.execute('SELECT username, avatar_url FROM profiles WHERE user_id = $1', [user.id]);
         const username = profileResult.length > 0 ? profileResult[0].username : '';
+        const avatar_url = profileResult.length > 0 ? profileResult[0].avatar_url : null;
 
-        // Generate access token using user data
+        // Generate access token using user data including avatar URL
         const accessToken = generateAccessToken({ 
             user_id: user.id, 
             username: username, 
-            email: user.email 
+            email: user.email,
+            avatar_url: avatar_url
         });
 
-        // Generate refresh token using user data
+        // Generate refresh token using user data including avatar URL
         const refreshToken = generateRefreshToken({ 
             user_id: user.id, 
             username: username, 
-            email: user.email 
+            email: user.email,
+            avatar_url: avatar_url
         });
 
         // Return response with the generated tokens
@@ -998,7 +1001,8 @@ const handleRefreshToken = async (event, db) => {
         const newAccessToken = generateAccessToken({ 
             user_id: decoded.user_id, 
             username: decoded.username, 
-            email: decoded.email 
+            email: decoded.email,
+            avatar_url: decoded.avatar_url || null
         });
 
         return {
@@ -1056,6 +1060,7 @@ const handleGoogleSignin = async (event, db) => {
         let userId;
         let requiresUsername = false;
         let userUsername = null;
+        let userAvatar = null;
         
         if (existingUsers.length > 0) {
             // Existing user - update the Google tokens
@@ -1068,14 +1073,15 @@ const handleGoogleSignin = async (event, db) => {
                 [googleId, emailVerified, userId]
             );
             
-            // Check if user has a profile with username
+            // Check if user has a profile with username and avatar
             const [profileResult] = await db.execute(
-                'SELECT username FROM profiles WHERE user_id = $1', 
+                'SELECT username, avatar_url FROM profiles WHERE user_id = $1', 
                 [userId]
             );
             
             if (profileResult.length > 0) {
                 userUsername = profileResult[0].username;
+                userAvatar = profileResult[0].avatar_url;
             } else {
                 requiresUsername = true;
             }
@@ -1145,19 +1151,22 @@ const handleGoogleSignin = async (event, db) => {
             );
             
             userUsername = username;
+            userAvatar = defaultAvatar;
         }
         
         // Generate auth tokens
         const accessToken = generateAccessToken({
             user_id: userId,
             username: userUsername,
-            email
+            email,
+            avatar_url: userAvatar
         });
         
         const refreshToken = generateRefreshToken({
             user_id: userId,
             username: userUsername,
-            email
+            email,
+            avatar_url: userAvatar
         });
         
         // Commit the transaction

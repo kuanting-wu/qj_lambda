@@ -11,7 +11,8 @@ const generateAccessToken = (user) => {
     { 
       user_id: user.user_id, 
       username: user.username, 
-      email: user.email 
+      email: user.email,
+      avatar_url: user.avatar_url || null
     },
     process.env.JWT_SECRET,
     { expiresIn: '1h' }
@@ -29,7 +30,8 @@ const generateRefreshToken = (user) => {
     { 
       user_id: user.user_id, 
       username: user.username, 
-      email: user.email 
+      email: user.email,
+      avatar_url: user.avatar_url || null
     },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: '7d' }

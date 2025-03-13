@@ -181,17 +181,27 @@ const handleEditProfile = async (event, db, user) => {
             if (new_username && new_username !== user.username) {
                 console.log(`Username changed from ${user.username} to ${new_username}, generating new tokens`);
                 
-                // Create new tokens with the updated username
+                // Get the current avatar URL
+                const [profileInfo] = await db.execute(
+                    'SELECT avatar_url FROM profiles WHERE user_id = $1',
+                    [user.user_id]
+                );
+                
+                const avatarUrl = profileInfo.length > 0 ? profileInfo[0].avatar_url : null;
+                
+                // Create new tokens with the updated username and avatar URL
                 const accessToken = generateAccessToken({ 
                     user_id: user.user_id,
                     username: new_username,
-                    email: user.email
+                    email: user.email,
+                    avatar_url: avatarUrl
                 });
                 
                 const refreshToken = generateRefreshToken({
                     user_id: user.user_id,
                     username: new_username,
-                    email: user.email
+                    email: user.email,
+                    avatar_url: avatarUrl
                 });
                 
                 updatedTokens = {

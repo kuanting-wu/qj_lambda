@@ -142,12 +142,32 @@ const handleDirectUpload = async (requestBody, db, user, event) => {
             [uploadResult.url, user.user_id]
         );
         
+        // Generate new tokens that include the avatar URL
+        const { generateAccessToken, generateRefreshToken } = require('../auth');
+        
+        // Generate new tokens with the updated avatar URL
+        const accessToken = generateAccessToken({ 
+            user_id: user.user_id,
+            username: user.username,
+            email: user.email,
+            avatar_url: uploadResult.url
+        });
+        
+        const refreshToken = generateRefreshToken({
+            user_id: user.user_id,
+            username: user.username,
+            email: user.email,
+            avatar_url: uploadResult.url
+        });
+        
         return addCorsHeaders({
             statusCode: 200,
             body: JSON.stringify({
                 message: 'Avatar uploaded successfully',
                 avatarUrl: uploadResult.url,
-                previousUrl: oldAvatarUrl
+                previousUrl: oldAvatarUrl,
+                accessToken,
+                refreshToken
             })
         }, event);
     } catch (error) {
@@ -244,11 +264,31 @@ const handleDeleteAvatar = async (requestBody, db, user, event) => {
             [defaultAvatarUrl, user.user_id]
         );
         
+        // Generate new tokens that include the default avatar URL
+        const { generateAccessToken, generateRefreshToken } = require('../auth');
+        
+        // Generate new tokens with the updated avatar URL
+        const accessToken = generateAccessToken({ 
+            user_id: user.user_id,
+            username: user.username,
+            email: user.email,
+            avatar_url: defaultAvatarUrl
+        });
+        
+        const refreshToken = generateRefreshToken({
+            user_id: user.user_id,
+            username: user.username,
+            email: user.email,
+            avatar_url: defaultAvatarUrl
+        });
+        
         return addCorsHeaders({
             statusCode: 200,
             body: JSON.stringify({
                 message: 'Avatar deleted successfully',
-                defaultAvatarUrl: defaultAvatarUrl
+                defaultAvatarUrl: defaultAvatarUrl,
+                accessToken,
+                refreshToken
             })
         }, event);
     } catch (error) {
