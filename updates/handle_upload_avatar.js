@@ -1,6 +1,37 @@
 const { uploadAvatar, getPresignedUploadUrl, deleteAvatar } = require('../s3-avatar-helper');
 
 /**
+ * Helper function to add CORS headers to responses
+ */
+const addCorsHeaders = (response, event) => {
+    const origin = event.headers?.origin || event.headers?.Origin || 'http://localhost:8080';
+    
+    // Define allowed origins
+    const allowedOrigins = [
+        'http://localhost:8080',
+        'http://localhost:8081',
+        'https://quantifyjiujitsu.com',
+        'https://www.quantifyjiujitsu.com',
+        'https://dev.quantifyjiujitsu.com',
+        'https://staging.quantifyjiujitsu.com'
+    ];
+    
+    // Use the origin if it's in the allowed list, otherwise use a default
+    const responseOrigin = allowedOrigins.includes(origin) ? origin : 'https://quantifyjiujitsu.com';
+    
+    return {
+        ...response,
+        headers: {
+            ...response.headers,
+            'Access-Control-Allow-Origin': responseOrigin,
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key',
+            'Access-Control-Allow-Credentials': 'true'
+        }
+    };
+};
+
+/**
  * Handler for uploading and managing user avatars via S3
  * 
  * This handler supports three operations:
@@ -17,10 +48,10 @@ const handleUploadAvatar = async (event, db, user) => {
     
     // Only authenticated users can upload avatars
     if (!user || !user.user_id) {
-        return {
+        return addCorsHeaders({
             statusCode: 401,
             body: JSON.stringify({ error: 'Authentication required' })
-        };
+        }, event);
     }
     
     try {
@@ -30,43 +61,43 @@ const handleUploadAvatar = async (event, db, user) => {
         
         switch (operation) {
             case 'upload':
-                return await handleDirectUpload(requestBody, db, user);
+                return await handleDirectUpload(requestBody, db, user, event);
             
             case 'getUrl':
-                return await handleGetPresignedUrl(requestBody, user);
+                return await handleGetPresignedUrl(requestBody, user, event);
             
             case 'delete':
-                return await handleDeleteAvatar(requestBody, db, user);
+                return await handleDeleteAvatar(requestBody, db, user, event);
             
             default:
-                return {
+                return addCorsHeaders({
                     statusCode: 400,
                     body: JSON.stringify({ error: 'Invalid operation. Supported operations: upload, getUrl, delete' })
-                };
+                }, event);
         }
     } catch (error) {
         console.error('Error handling avatar operation:', error);
-        return {
+        return addCorsHeaders({
             statusCode: 500,
             body: JSON.stringify({ 
                 error: 'Failed to process avatar request',
                 message: error.message
             })
-        };
+        }, event);
     }
 };
 
 /**
  * Handle direct upload of base64-encoded avatar images
  */
-const handleDirectUpload = async (requestBody, db, user) => {
+const handleDirectUpload = async (requestBody, db, user, event) => {
     const { imageData, contentType } = requestBody;
     
     if (!imageData) {
-        return {
+        return addCorsHeaders({
             statusCode: 400,
             body: JSON.stringify({ error: 'Image data is required' })
-        };
+        }, event);
     }
     
     try {
@@ -80,10 +111,10 @@ const handleDirectUpload = async (requestBody, db, user) => {
         // Make sure the image isn't too large (5MB max)
         const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
         if (imageBuffer.length > MAX_SIZE_BYTES) {
-            return {
+            return addCorsHeaders({
                 statusCode: 400,
                 body: JSON.stringify({ error: 'Image too large. Maximum size is 5MB.' })
-            };
+            }, event);
         }
         
         // Process and upload the image
@@ -107,36 +138,36 @@ const handleDirectUpload = async (requestBody, db, user) => {
             [uploadResult.url, user.user_id]
         );
         
-        return {
+        return addCorsHeaders({
             statusCode: 200,
             body: JSON.stringify({
                 message: 'Avatar uploaded successfully',
                 avatarUrl: uploadResult.url,
                 previousUrl: oldAvatarUrl
             })
-        };
+        }, event);
     } catch (error) {
         console.error('Error uploading avatar:', error);
-        return {
+        return addCorsHeaders({
             statusCode: 500,
             body: JSON.stringify({ 
                 error: 'Failed to upload avatar',
                 message: error.message
             })
-        };
+        }, event);
     }
 };
 
 /**
  * Handle generating a pre-signed URL for client-side uploads
  */
-const handleGetPresignedUrl = async (requestBody, user) => {
+const handleGetPresignedUrl = async (requestBody, user, event) => {
     const { contentType = 'image/jpeg' } = requestBody;
     
     try {
         const result = await getPresignedUploadUrl(user.user_id, contentType);
         
-        return {
+        return addCorsHeaders({
             statusCode: 200,
             body: JSON.stringify({
                 message: 'Pre-signed URL generated successfully',
@@ -149,23 +180,23 @@ const handleGetPresignedUrl = async (requestBody, user) => {
                     expires: '5 minutes'
                 }
             })
-        };
+        }, event);
     } catch (error) {
         console.error('Error generating pre-signed URL:', error);
-        return {
+        return addCorsHeaders({
             statusCode: 500,
             body: JSON.stringify({ 
                 error: 'Failed to generate upload URL',
                 message: error.message
             })
-        };
+        }, event);
     }
 };
 
 /**
  * Handle deleting an avatar
  */
-const handleDeleteAvatar = async (requestBody, db, user) => {
+const handleDeleteAvatar = async (requestBody, db, user, event) => {
     try {
         // Get the current avatar URL from the database
         const [profileResults] = await db.execute(
@@ -174,20 +205,20 @@ const handleDeleteAvatar = async (requestBody, db, user) => {
         );
         
         if (profileResults.length === 0) {
-            return {
+            return addCorsHeaders({
                 statusCode: 404,
                 body: JSON.stringify({ error: 'Profile not found' })
-            };
+            }, event);
         }
         
         const currentAvatarUrl = profileResults[0].avatar_url;
         
         // If there's no avatar to delete
         if (!currentAvatarUrl) {
-            return {
+            return addCorsHeaders({
                 statusCode: 400,
                 body: JSON.stringify({ error: 'No avatar to delete' })
-            };
+            }, event);
         }
         
         // Extract the key from the URL
@@ -209,22 +240,22 @@ const handleDeleteAvatar = async (requestBody, db, user) => {
             [defaultAvatarUrl, user.user_id]
         );
         
-        return {
+        return addCorsHeaders({
             statusCode: 200,
             body: JSON.stringify({
                 message: 'Avatar deleted successfully',
                 defaultAvatarUrl: defaultAvatarUrl
             })
-        };
+        }, event);
     } catch (error) {
         console.error('Error deleting avatar:', error);
-        return {
+        return addCorsHeaders({
             statusCode: 500,
             body: JSON.stringify({ 
                 error: 'Failed to delete avatar',
                 message: error.message
             })
-        };
+        }, event);
     }
 };
 

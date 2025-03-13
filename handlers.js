@@ -1339,13 +1339,9 @@ const handleEditProfile = async (event, db, user) => {
                     console.log("Transaction started for username change");
                 }
                 
-                // Update all posts' owner_name field 
-                // Note: After migration, this will update both owner_name and owner_id if needed
-                await db.execute(
-                    'UPDATE posts SET owner_name = $1 WHERE owner_name = $2',
-                    [new_username, user.username]
-                );
-                console.log(`Updated posts owner_name from ${user.username} to ${new_username}`);
+                // With the migration to owner_id, we don't need to update posts when username changes
+                // The posts are linked to the user's ID which doesn't change
+                console.log(`Username change from ${user.username} to ${new_username} - no post updates needed since we use owner_id now`);
                 
                 updates.push(`username = $${paramCounter++}`);
                 params.push(new_username);

@@ -9,17 +9,17 @@ const {
   handleResetPassword,
   handleViewPost,
   handleViewProfile,
-  handleSearch,
   handleProxyImage,
   handleRefreshToken,
   handleGoogleSignin,
-  handleEditProfile,
   handleNewPost,
   handleEditPost,
   handleDeletePost,
 } = require('./handlers');
 
-// Import the avatar upload handler
+// Import updated handlers that work with the new database schema
+const handleSearch = require('./updates/handle_search');
+const handleEditProfile = require('./updates/handle_edit_profile');
 const handleUploadAvatar = require('./updates/handle_upload_avatar');
 
 const {
