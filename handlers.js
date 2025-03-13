@@ -660,32 +660,31 @@ const handleViewPost = async (event, db) => {
     const postId = event.pathParameters.id;
     const { getMarkdownUrl } = require('./s3-helper'); // Import S3 helper
 
-    // Define the query to join the posts and profiles tables with the new structure
+    // Use the posts_with_owner view which already joins posts with profiles
     const query = `
       SELECT 
-        p.id,
-        p.title,
-        p.video_id,
-        p.video_platform,
-        p.movement_type,
-        p.starting_position,
-        p.ending_position,
-        p.starting_top_bottom,
-        p.ending_top_bottom,
-        p.gi_nogi,
-        p.practitioner,
-        p.sequence_start_time,
-        p.public_status,
-        p.language,
-        p.notes_path,
-        p.created_at,
-        p.owner_name,
-        pr.avatar_url,
-        pr.belt,
-        pr.academy
-      FROM posts p
-      JOIN profiles pr ON p.owner_name = pr.username
-      WHERE p.id = $1
+        id,
+        title,
+        video_id,
+        video_platform,
+        movement_type,
+        starting_position,
+        ending_position,
+        starting_top_bottom,
+        ending_top_bottom,
+        gi_nogi,
+        practitioner,
+        sequence_start_time,
+        public_status,
+        language,
+        notes_path,
+        created_at,
+        owner_name,
+        avatar_url,
+        belt,
+        academy
+      FROM posts_with_owner
+      WHERE id = $1
     `;
 
     try {
@@ -1555,7 +1554,7 @@ const handleNewPost = async (event, db, user) => {
           title,
           video_id,
           video_platform,
-          owner_name,
+          owner_id,
           movement_type,
           starting_position,
           ending_position,
@@ -1574,7 +1573,7 @@ const handleNewPost = async (event, db, user) => {
             title,
             video_id,
             video_platform,
-            username, // Using username instead of user_id now
+            user.user_id, // Using user_id instead of username
             movement_type,
             starting_position,
             ending_position,
@@ -1666,7 +1665,7 @@ const handleEditPost = async (event, db, user) => {
         const username = userResult[0].username;
         
         // Check if the post exists and if current user is the owner
-        const [postResults] = await db.execute('SELECT owner_name, notes_path FROM posts WHERE id = $1', [postId]);
+        const [postResults] = await db.execute('SELECT owner_id, notes_path FROM posts WHERE id = $1', [postId]);
 
         if (postResults.length === 0) {
             return {
@@ -1676,8 +1675,8 @@ const handleEditPost = async (event, db, user) => {
         }
 
         // Check if the authenticated user is the owner of the post
-        const postOwnerName = postResults[0].owner_name;
-        if (username !== postOwnerName) {
+        const postOwnerId = postResults[0].owner_id;
+        if (user.user_id !== postOwnerId) {
             return {
                 statusCode: 403,
                 body: JSON.stringify({ error: 'User not authorized to edit this post' })
@@ -1738,7 +1737,7 @@ const handleEditPost = async (event, db, user) => {
           public_status = $12,
           language = $13,
           notes_path = $14
-        WHERE id = $15 AND owner_name = $16
+        WHERE id = $15 AND owner_id = $16
       `;
 
         await db.execute(updateQuery, [
@@ -1757,7 +1756,7 @@ const handleEditPost = async (event, db, user) => {
             language,
             newNotesPath,
             postId,
-            username
+            user.user_id
         ]);
 
         // Return success message
@@ -1797,7 +1796,7 @@ const handleDeletePost = async (event, db, user) => {
         const username = userResult[0].username;
         
         // Check if the post exists and if user is the owner
-        const [results] = await db.execute('SELECT owner_name, notes_path FROM posts WHERE id = $1', [postId]);
+        const [results] = await db.execute('SELECT owner_id, notes_path FROM posts WHERE id = $1', [postId]);
 
         if (results.length === 0) {
             return {
@@ -1807,8 +1806,8 @@ const handleDeletePost = async (event, db, user) => {
         }
 
         // Check if the authenticated user is the owner of the post
-        const postOwnerName = results[0].owner_name;
-        if (username !== postOwnerName) {
+        const postOwnerId = results[0].owner_id;
+        if (user.user_id !== postOwnerId) {
             return {
                 statusCode: 403,
                 body: JSON.stringify({ error: 'User not authorized to delete this post' })
@@ -1830,8 +1829,8 @@ const handleDeletePost = async (event, db, user) => {
         }
 
         // Proceed with deleting the post
-        const deleteQuery = 'DELETE FROM posts WHERE id = $1 AND owner_name = $2';
-        await db.execute(deleteQuery, [postId, username]);
+        const deleteQuery = 'DELETE FROM posts WHERE id = $1 AND owner_id = $2';
+        await db.execute(deleteQuery, [postId, user.user_id]);
 
         // Send a success message
         return {
