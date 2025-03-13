@@ -1,3 +1,6 @@
+// Import auth functions for token generation when username changes
+const { generateAccessToken, generateRefreshToken } = require('../auth');
+
 // Updated handleEditProfile function that no longer updates owner_name in posts
 const handleEditProfile = async (event, db, user) => {
     console.log("Edit profile handler called", { pathParameters: event.pathParameters, user });
