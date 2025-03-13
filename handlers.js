@@ -1531,7 +1531,8 @@ const handleNewPost = async (event, db, user) => {
         // If notes are provided, upload them to S3
         if (notes && notes.trim() !== '') {
             try {
-                notesPath = await uploadMarkdownToS3(notes, id, username);
+                // Use user_id instead of username for storage path stability
+                notesPath = await uploadMarkdownToS3(notes, id, user.user_id);
                 console.log(`Markdown uploaded successfully with path: ${notesPath}`);
             } catch (s3Error) {
                 console.error('Error uploading markdown to S3:', s3Error);
@@ -1703,7 +1704,8 @@ const handleEditPost = async (event, db, user) => {
                 
                 // Upload new markdown file if content is provided
                 if (notes && notes.trim() !== '') {
-                    newNotesPath = await uploadMarkdownToS3(notes, postId, username);
+                    // Use user_id instead of username for storage path stability
+                    newNotesPath = await uploadMarkdownToS3(notes, postId, user.user_id);
                     console.log(`Uploaded new markdown file: ${newNotesPath}`);
                 } else {
                     // If notes is empty, set notes_path to null

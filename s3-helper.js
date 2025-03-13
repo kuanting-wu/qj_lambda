@@ -12,14 +12,15 @@ const s3Client = new S3Client();
 const MARKDOWN_BUCKET = process.env.MARKDOWN_BUCKET || 'qj-markdown-notes';
 
 // Upload markdown content to S3
-const uploadMarkdownToS3 = async (content, postId, ownerName) => {
+const uploadMarkdownToS3 = async (content, postId, ownerId) => {
   if (!content) {
     throw new Error('No content provided for upload');
   }
 
   try {
-    // Create a unique file path with owner and post ID
-    const key = `posts/${ownerName}/${postId}.md`;
+    // Create a unique file path with owner ID and post ID
+    // Using user ID instead of username for stability when username changes
+    const key = `posts/user_${ownerId}/${postId}.md`;
 
     // Upload the markdown file to S3
     const command = new PutObjectCommand({
