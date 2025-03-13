@@ -10,10 +10,14 @@ const addCorsHeaders = (response, event) => {
     const allowedOrigins = [
         'http://localhost:8080',
         'http://localhost:8081',
+        'http://localhost:3000',
         'https://quantifyjiujitsu.com',
         'https://www.quantifyjiujitsu.com',
         'https://dev.quantifyjiujitsu.com',
-        'https://staging.quantifyjiujitsu.com'
+        'https://staging.quantifyjiujitsu.com',
+        'https://api-dev.quantifyjiujitsu.com',
+        'https://api.quantifyjiujitsu.com',
+        'https://api-staging.quantifyjiujitsu.com'
     ];
     
     // Use the origin if it's in the allowed list, otherwise use a default
@@ -25,7 +29,7 @@ const addCorsHeaders = (response, event) => {
             ...response.headers,
             'Access-Control-Allow-Origin': responseOrigin,
             'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, X-Amz-Date, X-Amz-Security-Token, Accept, Origin, Referer, User-Agent',
             'Access-Control-Allow-Credentials': 'true'
         }
     };
