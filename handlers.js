@@ -1163,6 +1163,7 @@ const handleEditProfile = async (event, db, user) => {
         // Parse the request body and extract all fields
         const { 
             username: new_username, // Frontend might send username directly
+            name, // New name field (not unique)
             belt, academy, bio, location, nationality, weight_class, height, date_of_birth,
             social_links, achievements, website_url, contact_email, avatar_url
         } = JSON.parse(event.body);
@@ -1258,6 +1259,11 @@ const handleEditProfile = async (event, db, user) => {
             if (avatar_url !== undefined) { 
                 updates.push(`avatar_url = $${paramCounter++}`); 
                 params.push(avatar_url); 
+            }
+            
+            if (name !== undefined) { 
+                updates.push(`name = $${paramCounter++}`); 
+                params.push(name); 
             }
             
             // Handle username change separately
