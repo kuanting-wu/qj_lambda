@@ -1856,6 +1856,77 @@ const handleDeletePost = async (event, db, user) => {
     }
 };
 
+// Handle YouTube Auth URL
+const handleYouTubeAuthUrl = async (event, db, user) => {
+    const { getYouTubeAuthUrl } = require('./youtube-auth');
+    
+    // Check authentication
+    if (!user || !user.user_id) {
+        return {
+            statusCode: 401,
+            body: JSON.stringify({ error: 'User not authenticated' })
+        };
+    }
+    
+    try {
+        // Get the auth URL
+        const authUrl = getYouTubeAuthUrl();
+        
+        // Return the URL to the client
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ 
+                authUrl,
+                message: 'YouTube authentication URL generated successfully'
+            })
+        };
+    } catch (error) {
+        console.error('Error generating YouTube auth URL:', error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: 'Failed to generate YouTube auth URL' })
+        };
+    }
+};
+
+// Handle YouTube Auth Callback
+const handleYouTubeAuthCallback = async (event, db, user) => {
+    const { exchangeCodeForTokens } = require('./youtube-auth');
+    
+    // Extract code from query parameters
+    const { code } = event.queryStringParameters || {};
+    
+    if (!code) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: 'Authorization code is required' })
+        };
+    }
+    
+    try {
+        // Exchange the code for tokens
+        const tokenData = await exchangeCodeForTokens(code);
+        
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ 
+                success: true, 
+                message: 'YouTube authentication successful',
+                // Only return access token, not the refresh token for security
+                accessToken: tokenData.access_token
+            })
+        };
+    } catch (error) {
+        console.error('Error in YouTube auth callback:', error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ 
+                error: 'YouTube authentication failed',
+                details: error.message
+            })
+        };
+    }
+};
 
 module.exports = {
     handleSignup,
@@ -1874,4 +1945,6 @@ module.exports = {
     handleNewPost,
     handleEditPost,
     handleDeletePost,
+    handleYouTubeAuthUrl,
+    handleYouTubeAuthCallback,
 };
