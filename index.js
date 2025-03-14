@@ -15,6 +15,8 @@ const {
   handleNewPost,
   handleEditPost,
   handleDeletePost,
+  handleYouTubeChannelVideos,
+  handleYouTubeAuthCallback,
 } = require('./handlers');
 
 // Import updated handlers that work with the new database schema
@@ -196,7 +198,11 @@ exports.handler = async (event) => {
             handlerPromise = handleDeletePost(event, db, user);
           } else if (httpMethod === 'POST' && path === '/avatar') {
             handlerPromise = handleUploadAvatar(event, db, user);
-          } 
+          } else if (httpMethod === 'GET' && path === '/youtube/channel/videos') {
+            handlerPromise = handleYouTubeChannelVideos(event, db, user);
+          } else if (httpMethod === 'GET' && path === '/auth/youtube/callback') {
+            handlerPromise = handleYouTubeAuthCallback(event, db, user);
+          }
           // Game Plan routes
           else if (httpMethod === 'GET' && path === '/gameplans') {
             handlerPromise = getGamePlans(event, db);
