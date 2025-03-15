@@ -1896,7 +1896,11 @@ const handleYouTubeAuthCallback = async (event, db) => {
     // Extract code from query parameters
     const { code } = event.queryStringParameters || {};
     
+    console.log("YouTube Auth Callback received with code:", code ? `${code.substring(0, 10)}...` : 'none');
+    console.log("Full event query params:", JSON.stringify(event.queryStringParameters));
+    
     if (!code) {
+        console.error("Missing authorization code in callback");
         return {
             statusCode: 400,
             body: JSON.stringify({ error: 'Authorization code is required' })
@@ -1904,8 +1908,15 @@ const handleYouTubeAuthCallback = async (event, db) => {
     }
     
     try {
+        console.log("Exchanging code for tokens with YouTube API");
         // Exchange the code for tokens
         const tokenData = await exchangeCodeForTokens(code);
+        console.log("Token exchange successful:", {
+            access_token_preview: tokenData.access_token ? `${tokenData.access_token.substring(0, 10)}...` : 'none',
+            token_type: tokenData.token_type,
+            expires_in: tokenData.expires_in,
+            refresh_token_received: !!tokenData.refresh_token
+        });
         
         return {
             statusCode: 200,
@@ -1913,16 +1924,20 @@ const handleYouTubeAuthCallback = async (event, db) => {
                 success: true, 
                 message: 'YouTube authentication successful',
                 // Only return access token, not the refresh token for security
-                accessToken: tokenData.access_token
+                accessToken: tokenData.access_token,
+                expiresIn: tokenData.expires_in,
+                tokenType: tokenData.token_type
             })
         };
     } catch (error) {
         console.error('Error in YouTube auth callback:', error);
+        console.error('Error details:', error.response?.data || error.message);
         return {
             statusCode: 500,
             body: JSON.stringify({ 
                 error: 'YouTube authentication failed',
-                details: error.message
+                details: error.message,
+                errorData: error.response?.data || null
             })
         };
     }

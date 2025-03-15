@@ -37,25 +37,47 @@ const getYouTubeAuthUrl = () => {
  */
 const exchangeCodeForTokens = async (code) => {
     try {
+        console.log("YouTube Auth - Starting token exchange with code:", code.substring(0, 10) + "...");
+        console.log("YouTube Auth - Using config:", {
+            client_id_prefix: YOUTUBE_CLIENT_ID.substring(0, 8) + "...",
+            redirect_uri: YOUTUBE_REDIRECT_URI,
+            client_secret_set: !!YOUTUBE_CLIENT_SECRET
+        });
+        
+        // This is important - Google requires form data for token exchange, not JSON
+        const params = new URLSearchParams();
+        params.append('code', code);
+        params.append('client_id', YOUTUBE_CLIENT_ID);
+        params.append('client_secret', YOUTUBE_CLIENT_SECRET);
+        params.append('redirect_uri', YOUTUBE_REDIRECT_URI);
+        params.append('grant_type', 'authorization_code');
+        
+        console.log("YouTube Auth - Sending token request to Google");
+        
         const response = await axios.post(
             'https://oauth2.googleapis.com/token',
-            {
-                code,
-                client_id: YOUTUBE_CLIENT_ID,
-                client_secret: YOUTUBE_CLIENT_SECRET,
-                redirect_uri: YOUTUBE_REDIRECT_URI,
-                grant_type: 'authorization_code'
-            },
+            params,
             {
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/x-www-form-urlencoded'
                 }
             }
         );
 
+        console.log("YouTube Auth - Token exchange successful, received response:", {
+            access_token_received: !!response.data.access_token,
+            refresh_token_received: !!response.data.refresh_token,
+            token_type: response.data.token_type,
+            expires_in: response.data.expires_in
+        });
+
         return response.data;
     } catch (error) {
         console.error('Error exchanging code for tokens:', error);
+        if (error.response) {
+            console.error('Response error data:', error.response.data);
+            console.error('Response error status:', error.response.status);
+        }
         throw error;
     }
 };
