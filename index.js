@@ -162,9 +162,6 @@ exports.handler = async (event) => {
       } else if (httpMethod === 'POST' && path === '/google-signin') {
         handlerPromise = handleGoogleSignin(event, db);
       } else if (httpMethod === 'GET' && path === '/verify-email') {
-        console.log("Verify email endpoint called with path:", path);
-        console.log("Query parameters:", JSON.stringify(event.queryStringParameters));
-        console.log("Calling handleVerifyEmail handler");
         handlerPromise = handleVerifyEmail(event, db);
       } else if (httpMethod === 'POST' && path === '/resend-verification') {
         handlerPromise = handleResendVerification(event, db);

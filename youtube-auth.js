@@ -5,7 +5,7 @@ const axios = require('axios');
 // In a production environment, these should be stored as environment variables
 const YOUTUBE_CLIENT_ID = process.env.YOUTUBE_CLIENT_ID || '123456789012-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com';
 const YOUTUBE_CLIENT_SECRET = process.env.YOUTUBE_CLIENT_SECRET || 'YOUR_CLIENT_SECRET';
-const YOUTUBE_REDIRECT_URI = process.env.YOUTUBE_REDIRECT_URI || 'https://quantifyjiujitsu.com/auth/youtube/callback';
+const YOUTUBE_REDIRECT_URI = process.env.YOUTUBE_REDIRECT_URI || 'https://api-dev.quantifyjiujitsu.com/auth/youtube/callback';
 
 /**
  * Get the YouTube OAuth URL for user authentication
