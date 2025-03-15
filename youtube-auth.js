@@ -1,5 +1,6 @@
 // YouTube Authentication Helper
 const axios = require('axios');
+const { pool } = require('./db');
 
 // YouTube OAuth configuration
 // In a production environment, these should be stored as environment variables
@@ -9,9 +10,10 @@ const YOUTUBE_REDIRECT_URI = process.env.YOUTUBE_REDIRECT_URI || 'https://api-de
 
 /**
  * Get the YouTube OAuth URL for user authentication
+ * @param {string} state - Optional state parameter to include in the OAuth flow (typically a token to identify the user)
  * @returns {string} The OAuth URL to redirect the user to
  */
-const getYouTubeAuthUrl = () => {
+const getYouTubeAuthUrl = (state = null) => {
     // Define the required scopes
     const scopes = [
         'https://www.googleapis.com/auth/youtube.readonly',
@@ -19,13 +21,18 @@ const getYouTubeAuthUrl = () => {
     ].join(' ');
 
     // Build the OAuth URL
-    const authUrl = 'https://accounts.google.com/o/oauth2/auth?' + 
+    let authUrl = 'https://accounts.google.com/o/oauth2/auth?' + 
         `client_id=${YOUTUBE_CLIENT_ID}` +
         `&redirect_uri=${encodeURIComponent(YOUTUBE_REDIRECT_URI)}` +
         `&scope=${encodeURIComponent(scopes)}` +
         '&response_type=code' +
         '&access_type=offline' +
         '&prompt=consent';
+    
+    // Add state parameter if provided
+    if (state) {
+        authUrl += `&state=${encodeURIComponent(state)}`;
+    }
 
     return authUrl;
 };
@@ -82,7 +89,133 @@ const exchangeCodeForTokens = async (code) => {
     }
 };
 
+/**
+ * Save YouTube OAuth tokens to the database for a user
+ * @param {number} userId - The user ID
+ * @param {Object} tokens - The token data (access_token, refresh_token, etc.)
+ * @returns {Promise<Object>} - The saved token record
+ */
+const saveYouTubeTokens = async (userId, tokens) => {
+    try {
+        console.log(`Saving YouTube tokens for user ${userId}`);
+        
+        // Calculate expiration time
+        const expiresAt = tokens.expires_in 
+            ? new Date(Date.now() + (tokens.expires_in * 1000)).toISOString()
+            : null;
+        
+        // Check if user already has tokens
+        const checkResult = await pool.query(
+            'SELECT id FROM youtube_tokens WHERE user_id = $1',
+            [userId]
+        );
+        
+        let result;
+        
+        if (checkResult.rows.length > 0) {
+            // Update existing record
+            result = await pool.query(
+                `UPDATE youtube_tokens 
+                SET access_token = $1, 
+                    refresh_token = COALESCE($2, refresh_token),
+                    token_type = $3,
+                    expires_at = $4,
+                    updated_at = NOW()
+                WHERE user_id = $5
+                RETURNING *`,
+                [
+                    tokens.access_token,
+                    tokens.refresh_token || null,
+                    tokens.token_type || 'Bearer',
+                    expiresAt,
+                    userId
+                ]
+            );
+        } else {
+            // Create new record
+            result = await pool.query(
+                `INSERT INTO youtube_tokens 
+                (user_id, access_token, refresh_token, token_type, expires_at)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING *`,
+                [
+                    userId,
+                    tokens.access_token,
+                    tokens.refresh_token || null,
+                    tokens.token_type || 'Bearer',
+                    expiresAt
+                ]
+            );
+        }
+        
+        console.log('YouTube tokens saved successfully');
+        return result.rows[0];
+    } catch (error) {
+        console.error('Error saving YouTube tokens:', error);
+        throw error;
+    }
+};
+
+/**
+ * Get YouTube OAuth tokens for a user
+ * @param {number} userId - The user ID
+ * @returns {Promise<Object|null>} - The token data or null if not found
+ */
+const getYouTubeTokens = async (userId) => {
+    try {
+        console.log(`Getting YouTube tokens for user ${userId}`);
+        
+        const result = await pool.query(
+            'SELECT * FROM youtube_tokens WHERE user_id = $1',
+            [userId]
+        );
+        
+        if (result.rows.length === 0) {
+            console.log(`No YouTube tokens found for user ${userId}`);
+            return null;
+        }
+        
+        const tokenData = result.rows[0];
+        
+        // Check if token is expired
+        if (tokenData.expires_at && new Date(tokenData.expires_at) < new Date()) {
+            console.log('Token is expired, needs refresh');
+            
+            // You would implement token refresh logic here using refresh_token
+            // const refreshedTokens = await refreshYouTubeToken(tokenData.refresh_token);
+            // await saveYouTubeTokens(userId, refreshedTokens);
+            // return refreshedTokens;
+            
+            // For now, just return the expired token
+            tokenData.is_expired = true;
+        }
+        
+        return tokenData;
+    } catch (error) {
+        console.error('Error getting YouTube tokens:', error);
+        throw error;
+    }
+};
+
+/**
+ * Check if a user has valid YouTube OAuth tokens
+ * @param {number} userId - The user ID
+ * @returns {Promise<boolean>} - True if tokens exist and are valid
+ */
+const hasValidYouTubeTokens = async (userId) => {
+    try {
+        const tokens = await getYouTubeTokens(userId);
+        return tokens && !tokens.is_expired;
+    } catch (error) {
+        console.error('Error checking YouTube token validity:', error);
+        return false;
+    }
+};
+
 module.exports = {
     getYouTubeAuthUrl,
-    exchangeCodeForTokens
+    exchangeCodeForTokens,
+    saveYouTubeTokens,
+    getYouTubeTokens,
+    hasValidYouTubeTokens
 };

@@ -1858,7 +1858,8 @@ const handleDeletePost = async (event, db, user) => {
 
 // Handle YouTube Auth URL
 const handleYouTubeAuthUrl = async (event, db, user) => {
-    const { getYouTubeAuthUrl } = require('./youtube-auth');
+    const { getYouTubeAuthUrl, hasValidYouTubeTokens } = require('./youtube-auth');
+    const { generateToken } = require('./auth');
     
     // Check authentication
     if (!user || !user.user_id) {
@@ -1869,8 +1870,25 @@ const handleYouTubeAuthUrl = async (event, db, user) => {
     }
     
     try {
-        // Get the auth URL
-        const authUrl = getYouTubeAuthUrl();
+        // Check if user already has valid tokens
+        const hasTokens = await hasValidYouTubeTokens(user.user_id);
+        
+        if (hasTokens) {
+            return {
+                statusCode: 200,
+                body: JSON.stringify({
+                    alreadyAuthenticated: true,
+                    message: 'User already has valid YouTube authentication'
+                })
+            };
+        }
+        
+        // Generate a short-lived token to include user_id in the state parameter
+        // This will be passed back in the callback to identify the user
+        const stateToken = await generateToken({ userId: user.user_id }, '1h');
+        
+        // Get the auth URL with state parameter
+        const authUrl = getYouTubeAuthUrl(stateToken);
         
         // Return the URL to the client
         return {
@@ -1889,12 +1907,59 @@ const handleYouTubeAuthUrl = async (event, db, user) => {
     }
 };
 
+// Handle YouTube token check - returns if the user has valid tokens
+const handleYouTubeTokenCheck = async (event, db, user) => {
+    const { hasValidYouTubeTokens, getYouTubeTokens } = require('./youtube-auth');
+    
+    // Check authentication
+    if (!user || !user.user_id) {
+        return {
+            statusCode: 401,
+            body: JSON.stringify({ error: 'User not authenticated' })
+        };
+    }
+    
+    try {
+        // Check if user has valid tokens
+        const hasTokens = await hasValidYouTubeTokens(user.user_id);
+        
+        if (hasTokens) {
+            // Get the token data
+            const tokenData = await getYouTubeTokens(user.user_id);
+            
+            return {
+                statusCode: 200,
+                body: JSON.stringify({
+                    authenticated: true,
+                    // Only return access token, not the refresh token
+                    accessToken: tokenData.access_token,
+                    expiresAt: tokenData.expires_at
+                })
+            };
+        } else {
+            return {
+                statusCode: 200,
+                body: JSON.stringify({
+                    authenticated: false
+                })
+            };
+        }
+    } catch (error) {
+        console.error('Error checking YouTube token status:', error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: 'Failed to check YouTube token status' })
+        };
+    }
+};
+
 // Handle YouTube Auth Callback
 const handleYouTubeAuthCallback = async (event, db) => {
-    const { exchangeCodeForTokens } = require('./youtube-auth');
+    const { exchangeCodeForTokens, saveYouTubeTokens } = require('./youtube-auth');
+    const { jwtDecode } = require('./auth');
     
     // Extract code from query parameters
-    const { code } = event.queryStringParameters || {};
+    const { code, state } = event.queryStringParameters || {};
     
     console.log("YouTube Auth Callback received with code:", code ? `${code.substring(0, 10)}...` : 'none');
     console.log("Full event query params:", JSON.stringify(event.queryStringParameters));
@@ -1918,6 +1983,25 @@ const handleYouTubeAuthCallback = async (event, db) => {
             refresh_token_received: !!tokenData.refresh_token
         });
         
+        // If state contains a user token, extract the user ID and save the tokens to database
+        let userId = null;
+        if (state) {
+            try {
+                // The state should be the JWT token
+                const decodedToken = await jwtDecode(state);
+                userId = decodedToken.userId;
+                
+                if (userId) {
+                    console.log(`Saving YouTube tokens for user ID: ${userId}`);
+                    await saveYouTubeTokens(userId, tokenData);
+                    console.log("YouTube tokens successfully saved to database");
+                }
+            } catch (stateError) {
+                console.error("Error decoding state parameter:", stateError);
+                // Continue even if state parsing fails - we'll still return the tokens to client
+            }
+        }
+        
         return {
             statusCode: 200,
             body: JSON.stringify({ 
@@ -1926,7 +2010,8 @@ const handleYouTubeAuthCallback = async (event, db) => {
                 // Only return access token, not the refresh token for security
                 accessToken: tokenData.access_token,
                 expiresIn: tokenData.expires_in,
-                tokenType: tokenData.token_type
+                tokenType: tokenData.token_type,
+                savedToDatabase: !!userId
             })
         };
     } catch (error) {
@@ -1962,4 +2047,5 @@ module.exports = {
     handleDeletePost,
     handleYouTubeAuthUrl,
     handleYouTubeAuthCallback,
+    handleYouTubeTokenCheck,
 };

@@ -17,6 +17,7 @@ const {
   handleDeletePost,
   handleYouTubeAuthUrl,
   handleYouTubeAuthCallback,
+  handleYouTubeTokenCheck,
 } = require('./handlers');
 
 // Import updated handlers that work with the new database schema
@@ -200,6 +201,8 @@ exports.handler = async (event) => {
             handlerPromise = handleUploadAvatar(event, db, user);
           } else if (httpMethod === 'GET' && path === '/youtube/auth') {
             handlerPromise = handleYouTubeAuthUrl(event, db, user);
+          } else if (httpMethod === 'GET' && path === '/youtube/token-check') {
+            handlerPromise = handleYouTubeTokenCheck(event, db, user);
           } else if (httpMethod === 'GET' && path === '/auth/youtube/callback') {
             handlerPromise = handleYouTubeAuthCallback(event, db, user);
           }
