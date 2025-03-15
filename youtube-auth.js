@@ -1,6 +1,5 @@
 // YouTube Authentication Helper
 const axios = require('axios');
-const { pool } = require('./db');
 
 // YouTube OAuth configuration
 // In a production environment, these should be stored as environment variables
@@ -91,65 +90,79 @@ const exchangeCodeForTokens = async (code) => {
 
 /**
  * Save YouTube OAuth tokens to the database for a user
+ * @param {Object} db - The database connection
  * @param {number} userId - The user ID
  * @param {Object} tokens - The token data (access_token, refresh_token, etc.)
  * @returns {Promise<Object>} - The saved token record
  */
-const saveYouTubeTokens = async (userId, tokens) => {
+const saveYouTubeTokens = async (db, userId, tokens) => {
     try {
         console.log(`Saving YouTube tokens for user ${userId}`);
+        
+        if (!db) {
+            console.error('Database connection is null or undefined');
+            throw new Error('Database connection is required');
+        }
         
         // Calculate expiration time
         const expiresAt = tokens.expires_in 
             ? new Date(Date.now() + (tokens.expires_in * 1000)).toISOString()
             : null;
+            
+        // Make sure the table exists - this avoids the need to run migration separately
+        await ensureYoutubeTokensTable(db);
         
-        // Check if user already has tokens
-        const checkResult = await pool.query(
-            'SELECT id FROM youtube_tokens WHERE user_id = $1',
-            [userId]
-        );
-        
-        let result;
-        
-        if (checkResult.rows.length > 0) {
-            // Update existing record
-            result = await pool.query(
-                `UPDATE youtube_tokens 
-                SET access_token = $1, 
-                    refresh_token = COALESCE($2, refresh_token),
-                    token_type = $3,
-                    expires_at = $4,
-                    updated_at = NOW()
-                WHERE user_id = $5
-                RETURNING *`,
-                [
-                    tokens.access_token,
-                    tokens.refresh_token || null,
-                    tokens.token_type || 'Bearer',
-                    expiresAt,
-                    userId
-                ]
+        try {
+            // Check if user already has tokens
+            const checkResult = await db.query(
+                'SELECT id FROM youtube_tokens WHERE user_id = $1',
+                [userId]
             );
-        } else {
-            // Create new record
-            result = await pool.query(
-                `INSERT INTO youtube_tokens 
-                (user_id, access_token, refresh_token, token_type, expires_at)
-                VALUES ($1, $2, $3, $4, $5)
-                RETURNING *`,
-                [
-                    userId,
-                    tokens.access_token,
-                    tokens.refresh_token || null,
-                    tokens.token_type || 'Bearer',
-                    expiresAt
-                ]
-            );
+            
+            let result;
+            
+            if (checkResult.rows.length > 0) {
+                // Update existing record
+                result = await db.query(
+                    `UPDATE youtube_tokens 
+                    SET access_token = $1, 
+                        refresh_token = COALESCE($2, refresh_token),
+                        token_type = $3,
+                        expires_at = $4,
+                        updated_at = NOW()
+                    WHERE user_id = $5
+                    RETURNING *`,
+                    [
+                        tokens.access_token,
+                        tokens.refresh_token || null,
+                        tokens.token_type || 'Bearer',
+                        expiresAt,
+                        userId
+                    ]
+                );
+            } else {
+                // Create new record
+                result = await db.query(
+                    `INSERT INTO youtube_tokens 
+                    (user_id, access_token, refresh_token, token_type, expires_at)
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING *`,
+                    [
+                        userId,
+                        tokens.access_token,
+                        tokens.refresh_token || null,
+                        tokens.token_type || 'Bearer',
+                        expiresAt
+                    ]
+                );
+            }
+            
+            console.log('YouTube tokens saved successfully');
+            return result.rows[0];
+        } catch (dbError) {
+            console.error('Database operation failed:', dbError);
+            throw dbError;
         }
-        
-        console.log('YouTube tokens saved successfully');
-        return result.rows[0];
     } catch (error) {
         console.error('Error saving YouTube tokens:', error);
         throw error;
@@ -157,55 +170,140 @@ const saveYouTubeTokens = async (userId, tokens) => {
 };
 
 /**
- * Get YouTube OAuth tokens for a user
- * @param {number} userId - The user ID
- * @returns {Promise<Object|null>} - The token data or null if not found
+ * Ensure the YouTube tokens table exists
+ * @param {Object} db - The database connection
  */
-const getYouTubeTokens = async (userId) => {
+const ensureYoutubeTokensTable = async (db) => {
     try {
-        console.log(`Getting YouTube tokens for user ${userId}`);
-        
-        // Check if the table exists first
-        const tableCheckResult = await pool.query(`
+        // Check if the table exists
+        const tableCheck = await db.query(`
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
                 WHERE table_name = 'youtube_tokens'
             )
         `);
         
-        const tableExists = tableCheckResult.rows[0].exists;
+        const tableExists = tableCheck.rows[0].exists;
+        
         if (!tableExists) {
-            console.log('YouTube tokens table does not exist yet');
+            console.log('YouTube tokens table does not exist, creating it...');
+            
+            // Create the table
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS youtube_tokens (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    access_token TEXT NOT NULL,
+                    refresh_token TEXT,
+                    token_type VARCHAR(20),
+                    expires_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE(user_id)
+                );
+
+                -- Create an index on user_id for faster lookups
+                CREATE INDEX IF NOT EXISTS idx_youtube_tokens_user_id ON youtube_tokens(user_id);
+            `);
+            
+            // Create the updated_at trigger function if it doesn't exist
+            const triggerFunctionCheck = await db.query(`
+                SELECT EXISTS (
+                    SELECT FROM pg_proc
+                    WHERE proname = 'update_youtube_tokens_updated_at'
+                )
+            `);
+            
+            const triggerFunctionExists = triggerFunctionCheck.rows[0].exists;
+            
+            if (!triggerFunctionExists) {
+                await db.query(`
+                    CREATE OR REPLACE FUNCTION update_youtube_tokens_updated_at()
+                    RETURNS TRIGGER AS $$
+                    BEGIN
+                        NEW.updated_at = NOW();
+                        RETURN NEW;
+                    END;
+                    $$ LANGUAGE plpgsql;
+                    
+                    -- Create a trigger to automatically update 'updated_at' on record update
+                    DROP TRIGGER IF EXISTS update_youtube_tokens_updated_at ON youtube_tokens;
+                    CREATE TRIGGER update_youtube_tokens_updated_at
+                    BEFORE UPDATE ON youtube_tokens
+                    FOR EACH ROW
+                    EXECUTE FUNCTION update_youtube_tokens_updated_at();
+                `);
+            }
+            
+            console.log('YouTube tokens table created successfully');
+        }
+    } catch (error) {
+        console.error('Error ensuring YouTube tokens table:', error);
+        throw error;
+    }
+};
+
+/**
+ * Get YouTube OAuth tokens for a user
+ * @param {Object} db - The database connection
+ * @param {number} userId - The user ID
+ * @returns {Promise<Object|null>} - The token data or null if not found
+ */
+const getYouTubeTokens = async (db, userId) => {
+    try {
+        console.log(`Getting YouTube tokens for user ${userId}`);
+        
+        if (!db) {
+            console.error('Database connection is null or undefined');
             return null;
         }
         
-        // Now safely query the table
-        const result = await pool.query(
-            'SELECT * FROM youtube_tokens WHERE user_id = $1',
-            [userId]
-        );
-        
-        if (result.rows.length === 0) {
-            console.log(`No YouTube tokens found for user ${userId}`);
+        try {
+            // Check if the table exists first
+            const tableCheckResult = await db.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'youtube_tokens'
+                )
+            `);
+            
+            const tableExists = tableCheckResult.rows[0].exists;
+            if (!tableExists) {
+                console.log('YouTube tokens table does not exist yet');
+                return null;
+            }
+            
+            // Now safely query the table
+            const result = await db.query(
+                'SELECT * FROM youtube_tokens WHERE user_id = $1',
+                [userId]
+            );
+            
+            if (result.rows.length === 0) {
+                console.log(`No YouTube tokens found for user ${userId}`);
+                return null;
+            }
+            
+            const tokenData = result.rows[0];
+            
+            // Check if token is expired
+            if (tokenData.expires_at && new Date(tokenData.expires_at) < new Date()) {
+                console.log('Token is expired, needs refresh');
+                
+                // You would implement token refresh logic here using refresh_token
+                // const refreshedTokens = await refreshYouTubeToken(tokenData.refresh_token);
+                // await saveYouTubeTokens(db, userId, refreshedTokens);
+                // return refreshedTokens;
+                
+                // For now, just return the expired token
+                tokenData.is_expired = true;
+            }
+            
+            return tokenData;
+        } catch (dbError) {
+            console.error('Database error getting YouTube tokens:', dbError);
             return null;
         }
-        
-        const tokenData = result.rows[0];
-        
-        // Check if token is expired
-        if (tokenData.expires_at && new Date(tokenData.expires_at) < new Date()) {
-            console.log('Token is expired, needs refresh');
-            
-            // You would implement token refresh logic here using refresh_token
-            // const refreshedTokens = await refreshYouTubeToken(tokenData.refresh_token);
-            // await saveYouTubeTokens(userId, refreshedTokens);
-            // return refreshedTokens;
-            
-            // For now, just return the expired token
-            tokenData.is_expired = true;
-        }
-        
-        return tokenData;
     } catch (error) {
         console.error('Error getting YouTube tokens:', error);
         // Return null instead of throwing to prevent cascading errors
@@ -215,13 +313,19 @@ const getYouTubeTokens = async (userId) => {
 
 /**
  * Check if a user has valid YouTube OAuth tokens
+ * @param {Object} db - The database connection
  * @param {number} userId - The user ID
  * @returns {Promise<boolean>} - True if tokens exist and are valid
  */
-const hasValidYouTubeTokens = async (userId) => {
+const hasValidYouTubeTokens = async (db, userId) => {
     try {
+        if (!db) {
+            console.error('Database connection is null or undefined');
+            return false;
+        }
+        
         // getYouTubeTokens is already defensively coded
-        const tokens = await getYouTubeTokens(userId);
+        const tokens = await getYouTubeTokens(db, userId);
         return tokens && !tokens.is_expired;
     } catch (error) {
         console.error('Error checking YouTube token validity:', error);

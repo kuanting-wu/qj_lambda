@@ -1877,7 +1877,7 @@ const handleYouTubeAuthUrl = async (event, db, user) => {
         } else {
             try {
                 // Check if user already has valid tokens
-                const hasTokens = await hasValidYouTubeTokens(user.user_id);
+                const hasTokens = await hasValidYouTubeTokens(db, user.user_id);
                 
                 if (hasTokens) {
                     return {
@@ -1954,11 +1954,11 @@ const handleYouTubeTokenCheck = async (event, db, user) => {
         // Wrap everything in try/catch to return graceful errors instead of 500
         try {
             // Check if user has valid tokens
-            const hasTokens = await hasValidYouTubeTokens(user.user_id);
+            const hasTokens = await hasValidYouTubeTokens(db, user.user_id);
             
             if (hasTokens) {
                 // Get the token data
-                const tokenData = await getYouTubeTokens(user.user_id);
+                const tokenData = await getYouTubeTokens(db, user.user_id);
                 
                 return {
                     statusCode: 200,
@@ -2036,13 +2036,25 @@ const handleYouTubeAuthCallback = async (event, db) => {
         if (state) {
             try {
                 // The state should be the JWT token
-                const decodedToken = await jwtDecode(state);
+                const decodedToken = jwtDecode(state);
                 userId = decodedToken.userId;
                 
-                if (userId) {
+                if (userId && db) {
                     console.log(`Saving YouTube tokens for user ID: ${userId}`);
-                    await saveYouTubeTokens(userId, tokenData);
-                    console.log("YouTube tokens successfully saved to database");
+                    try {
+                        await saveYouTubeTokens(db, userId, tokenData);
+                        console.log("YouTube tokens successfully saved to database");
+                    } catch (saveError) {
+                        console.error("Error saving YouTube tokens:", saveError);
+                        // Continue even if token saving fails - we'll still return the tokens to client
+                    }
+                } else {
+                    if (!userId) {
+                        console.warn("No user ID found in state token");
+                    }
+                    if (!db) {
+                        console.warn("No database connection available");
+                    }
                 }
             } catch (stateError) {
                 console.error("Error decoding state parameter:", stateError);
