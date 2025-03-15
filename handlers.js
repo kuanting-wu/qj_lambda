@@ -1890,7 +1890,7 @@ const handleYouTubeAuthUrl = async (event, db, user) => {
 };
 
 // Handle YouTube Auth Callback
-const handleYouTubeAuthCallback = async (event, db, user) => {
+const handleYouTubeAuthCallback = async (event, db) => {
     const { exchangeCodeForTokens } = require('./youtube-auth');
     
     // Extract code from query parameters

@@ -180,6 +180,9 @@ exports.handler = async (event) => {
       } else if (httpMethod === 'POST' && path === '/refresh-token') {
         // The refresh token endpoint should not require authentication
         handlerPromise = handleRefreshToken(event, db);
+      } else if (httpMethod === 'GET' && path === '/auth/youtube/callback') {
+        // YouTube OAuth callback should not require authentication
+        handlerPromise = handleYouTubeAuthCallback(event, db);
       } else {
         // Routes that require authentication
         try {
