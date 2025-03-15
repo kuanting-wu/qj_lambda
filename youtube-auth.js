@@ -165,6 +165,21 @@ const getYouTubeTokens = async (userId) => {
     try {
         console.log(`Getting YouTube tokens for user ${userId}`);
         
+        // Check if the table exists first
+        const tableCheckResult = await pool.query(`
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'youtube_tokens'
+            )
+        `);
+        
+        const tableExists = tableCheckResult.rows[0].exists;
+        if (!tableExists) {
+            console.log('YouTube tokens table does not exist yet');
+            return null;
+        }
+        
+        // Now safely query the table
         const result = await pool.query(
             'SELECT * FROM youtube_tokens WHERE user_id = $1',
             [userId]
@@ -193,7 +208,8 @@ const getYouTubeTokens = async (userId) => {
         return tokenData;
     } catch (error) {
         console.error('Error getting YouTube tokens:', error);
-        throw error;
+        // Return null instead of throwing to prevent cascading errors
+        return null;
     }
 };
 
@@ -204,6 +220,7 @@ const getYouTubeTokens = async (userId) => {
  */
 const hasValidYouTubeTokens = async (userId) => {
     try {
+        // getYouTubeTokens is already defensively coded
         const tokens = await getYouTubeTokens(userId);
         return tokens && !tokens.is_expired;
     } catch (error) {

@@ -60,8 +60,29 @@ const authenticateToken = async (event) => {
   }
 };
 
+// Generate a generic token with custom payload and expiration
+const generateToken = (payload, expiresIn = '1h') => {
+  if (!process.env.JWT_SECRET) {
+    console.error('JWT_SECRET environment variable is not set');
+    throw new Error('JWT_SECRET environment variable must be set');
+  }
+  
+  return jwt.sign(
+    payload,
+    process.env.JWT_SECRET,
+    { expiresIn }
+  );
+};
+
+// Decode a JWT token without verifying
+const jwtDecode = (token) => {
+  return jwt.decode(token);
+};
+
 module.exports = {
   generateAccessToken,
   generateRefreshToken,
   authenticateToken,
+  generateToken,
+  jwtDecode
 };

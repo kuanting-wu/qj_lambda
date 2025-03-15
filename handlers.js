@@ -1870,39 +1870,58 @@ const handleYouTubeAuthUrl = async (event, db, user) => {
     }
     
     try {
-        // Check if user already has valid tokens
-        const hasTokens = await hasValidYouTubeTokens(user.user_id);
-        
-        if (hasTokens) {
-            return {
-                statusCode: 200,
-                body: JSON.stringify({
-                    alreadyAuthenticated: true,
-                    message: 'User already has valid YouTube authentication'
-                })
-            };
+        // Ensure database connection
+        if (!db) {
+            console.warn('Database connection is null, proceeding without token check');
+            // Continue without token check - we want to allow auth
+        } else {
+            try {
+                // Check if user already has valid tokens
+                const hasTokens = await hasValidYouTubeTokens(user.user_id);
+                
+                if (hasTokens) {
+                    return {
+                        statusCode: 200,
+                        body: JSON.stringify({
+                            alreadyAuthenticated: true,
+                            message: 'User already has valid YouTube authentication'
+                        })
+                    };
+                }
+            } catch (tokenCheckError) {
+                console.error('Error checking existing tokens, proceeding to auth:', tokenCheckError);
+                // Continue to auth URL generation
+            }
         }
         
-        // Generate a short-lived token to include user_id in the state parameter
-        // This will be passed back in the callback to identify the user
-        const stateToken = await generateToken({ userId: user.user_id }, '1h');
-        
-        // Get the auth URL with state parameter
-        const authUrl = getYouTubeAuthUrl(stateToken);
-        
-        // Return the URL to the client
-        return {
-            statusCode: 200,
-            body: JSON.stringify({ 
-                authUrl,
-                message: 'YouTube authentication URL generated successfully'
-            })
-        };
+        try {
+            // Generate a short-lived token to include user_id in the state parameter
+            // This will be passed back in the callback to identify the user
+            const stateToken = generateToken({ userId: user.user_id }, '1h');
+            
+            // Get the auth URL with state parameter
+            const authUrl = getYouTubeAuthUrl(stateToken);
+            
+            // Return the URL to the client
+            return {
+                statusCode: 200,
+                body: JSON.stringify({ 
+                    authUrl,
+                    message: 'YouTube authentication URL generated successfully'
+                })
+            };
+        } catch (authUrlError) {
+            console.error('Error generating auth URL:', authUrlError);
+            return {
+                statusCode: 500,
+                body: JSON.stringify({ error: 'Failed to generate YouTube auth URL' })
+            };
+        }
     } catch (error) {
-        console.error('Error generating YouTube auth URL:', error);
+        console.error('Error in YouTube auth URL handler:', error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: 'Failed to generate YouTube auth URL' })
+            body: JSON.stringify({ error: 'Failed to process YouTube auth request' })
         };
     }
 };
@@ -1920,35 +1939,64 @@ const handleYouTubeTokenCheck = async (event, db, user) => {
     }
     
     try {
-        // Check if user has valid tokens
-        const hasTokens = await hasValidYouTubeTokens(user.user_id);
-        
-        if (hasTokens) {
-            // Get the token data
-            const tokenData = await getYouTubeTokens(user.user_id);
-            
+        // Check if the db connection is valid
+        if (!db) {
+            console.error('Database connection is null');
             return {
                 statusCode: 200,
                 body: JSON.stringify({
-                    authenticated: true,
-                    // Only return access token, not the refresh token
-                    accessToken: tokenData.access_token,
-                    expiresAt: tokenData.expires_at
+                    authenticated: false,
+                    error: 'Database connection issue'
                 })
             };
-        } else {
+        }
+        
+        // Wrap everything in try/catch to return graceful errors instead of 500
+        try {
+            // Check if user has valid tokens
+            const hasTokens = await hasValidYouTubeTokens(user.user_id);
+            
+            if (hasTokens) {
+                // Get the token data
+                const tokenData = await getYouTubeTokens(user.user_id);
+                
+                return {
+                    statusCode: 200,
+                    body: JSON.stringify({
+                        authenticated: true,
+                        // Only return access token, not the refresh token
+                        accessToken: tokenData.access_token,
+                        expiresAt: tokenData.expires_at
+                    })
+                };
+            } else {
+                return {
+                    statusCode: 200,
+                    body: JSON.stringify({
+                        authenticated: false
+                    })
+                };
+            }
+        } catch (innerError) {
+            console.error('Error in YouTube token check inner operation:', innerError);
+            // Return a 200 response with authentication false instead of a 500 error
             return {
                 statusCode: 200,
                 body: JSON.stringify({
-                    authenticated: false
+                    authenticated: false,
+                    message: 'Error checking token status'
                 })
             };
         }
     } catch (error) {
         console.error('Error checking YouTube token status:', error);
+        // Even for outer errors, return 200 with an error message
         return {
-            statusCode: 500,
-            body: JSON.stringify({ error: 'Failed to check YouTube token status' })
+            statusCode: 200,
+            body: JSON.stringify({ 
+                authenticated: false,
+                error: 'Failed to check YouTube token status'
+            })
         };
     }
 };
