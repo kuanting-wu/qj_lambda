@@ -241,6 +241,61 @@ const ensureYoutubeTokensTable = async (db) => {
 };
 
 /**
+ * Refresh a YouTube access token using a refresh token
+ * @param {string} refreshToken - The refresh token
+ * @returns {Promise<Object>} - The refreshed token data
+ */
+const refreshYouTubeToken = async (refreshToken) => {
+    try {
+        console.log('Refreshing YouTube token with refresh token');
+        
+        if (!refreshToken) {
+            throw new Error('Refresh token is required');
+        }
+        
+        // This is important - Google requires form data for token refresh, not JSON
+        const params = new URLSearchParams();
+        params.append('client_id', YOUTUBE_CLIENT_ID);
+        params.append('client_secret', YOUTUBE_CLIENT_SECRET);
+        params.append('refresh_token', refreshToken);
+        params.append('grant_type', 'refresh_token');
+        
+        console.log('Sending token refresh request to Google');
+        
+        const response = await axios.post(
+            'https://oauth2.googleapis.com/token',
+            params,
+            {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            }
+        );
+        
+        console.log('Token refresh successful, received new access token with expiry:', {
+            access_token_received: !!response.data.access_token,
+            token_type: response.data.token_type,
+            expires_in: response.data.expires_in
+        });
+        
+        // Ensure we preserve the refresh token, as Google doesn't always return it
+        const tokens = {
+            ...response.data,
+            refresh_token: refreshToken
+        };
+        
+        return tokens;
+    } catch (error) {
+        console.error('Error refreshing YouTube token:', error);
+        if (error.response) {
+            console.error('Response error data:', error.response.data);
+            console.error('Response error status:', error.response.status);
+        }
+        throw error;
+    }
+};
+
+/**
  * Get YouTube OAuth tokens for a user
  * @param {Object} db - The database connection
  * @param {number} userId - The user ID
@@ -287,13 +342,38 @@ const getYouTubeTokens = async (db, userId) => {
             if (tokenData.expires_at && new Date(tokenData.expires_at) < new Date()) {
                 console.log('Token is expired, needs refresh');
                 
-                // You would implement token refresh logic here using refresh_token
-                // const refreshedTokens = await refreshYouTubeToken(tokenData.refresh_token);
-                // await saveYouTubeTokens(db, userId, refreshedTokens);
-                // return refreshedTokens;
-                
-                // For now, just return the expired token
-                tokenData.is_expired = true;
+                // Implement token refresh logic
+                try {
+                    if (!tokenData.refresh_token) {
+                        console.error('No refresh token available, cannot refresh access token');
+                        tokenData.is_expired = true;
+                        return tokenData;
+                    }
+                    
+                    // Refresh the token
+                    const refreshedTokens = await refreshYouTubeToken(tokenData.refresh_token);
+                    
+                    // Save the refreshed tokens back to the database
+                    await saveYouTubeTokens(db, userId, refreshedTokens);
+                    
+                    // Get the updated tokens
+                    const updatedResult = await db.query(
+                        'SELECT * FROM youtube_tokens WHERE user_id = $1',
+                        [userId]
+                    );
+                    
+                    if (updatedResult.rows.length === 0) {
+                        console.error('Failed to retrieve updated tokens after refresh');
+                        return null;
+                    }
+                    
+                    console.log('Successfully refreshed and updated YouTube tokens');
+                    return updatedResult.rows[0];
+                } catch (refreshError) {
+                    console.error('Error refreshing YouTube token:', refreshError);
+                    tokenData.is_expired = true;
+                    return tokenData;
+                }
             }
             
             return tokenData;
@@ -335,5 +415,6 @@ module.exports = {
     exchangeCodeForTokens,
     saveYouTubeTokens,
     getYouTubeTokens,
-    hasValidYouTubeTokens
+    hasValidYouTubeTokens,
+    refreshYouTubeToken
 };

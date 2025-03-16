@@ -2174,24 +2174,28 @@ const handleYouTubeUploadInit = async (event, db, user) => {
             hasValidYouTubeTokens
         } = require('./youtube-auth');
 
-        // Check if user has valid tokens
-        const hasValidTokens = await hasValidYouTubeTokens(db, user.user_id);
-        if (!hasValidTokens) {
+        // Get the tokens directly - our getYouTubeTokens function now handles refreshing
+        const tokens = await getYouTubeTokens(db, user.user_id);
+        
+        // Check if tokens exist and aren't expired
+        if (!tokens) {
             return {
                 statusCode: 401,
                 body: JSON.stringify({
-                    error: 'No valid YouTube tokens',
+                    error: 'No YouTube tokens found',
                     message: 'Please authenticate with YouTube first'
                 })
             };
         }
-
-        // Get the tokens
-        const tokens = await getYouTubeTokens(db, user.user_id);
-        if (!tokens) {
+        
+        // Check if tokens are expired and couldn't be refreshed
+        if (tokens.is_expired) {
             return {
-                statusCode: 500,
-                body: JSON.stringify({ error: 'Failed to retrieve YouTube tokens' })
+                statusCode: 401,
+                body: JSON.stringify({
+                    error: 'YouTube tokens are expired and could not be refreshed',
+                    message: 'Please re-authenticate with YouTube'
+                })
             };
         }
 
@@ -2267,17 +2271,44 @@ const handleYouTubeUploadInit = async (event, db, user) => {
         } catch (youtubeError) {
             console.error('Error initializing YouTube upload:', youtubeError);
 
-            // If we get an auth error, we should mark the token as expired
+            // If we get an auth error, try to handle it appropriately
             if (youtubeError.response && (youtubeError.response.status === 401 || youtubeError.response.status === 403)) {
-                console.log('Authentication error with YouTube API, marking token as expired');
-
-                // In a production environment, we would refresh the token here
-                // For now, we'll just return an error
+                console.log('Authentication error with YouTube API:', youtubeError.response.status);
+                
+                // We've already tried to refresh tokens when getting them earlier, 
+                // but in case the token expired just after that, try again
+                try {
+                    const { refreshYouTubeToken, saveYouTubeTokens } = require('./youtube-auth');
+                    
+                    // Check if we have a refresh token
+                    if (tokens.refresh_token) {
+                        console.log('Attempting to refresh token after API auth error');
+                        
+                        // Refresh the token
+                        const refreshedTokens = await refreshYouTubeToken(tokens.refresh_token);
+                        
+                        // Save the refreshed tokens
+                        await saveYouTubeTokens(db, user.user_id, refreshedTokens);
+                        
+                        // Let the user know to try again
+                        return {
+                            statusCode: 401,
+                            body: JSON.stringify({ 
+                                error: 'Token refreshed, please try again', 
+                                message: 'Your YouTube token has been refreshed. Please try your upload again.'
+                            })
+                        };
+                    }
+                } catch (refreshError) {
+                    console.error('Failed to refresh token after API auth error:', refreshError);
+                }
+                
+                // If we reach here, we couldn't refresh the token
                 return {
                     statusCode: 401,
-                    body: JSON.stringify({
-                        error: 'YouTube authentication error',
-                        message: 'Your YouTube authorization has expired. Please reconnect your account.'
+                    body: JSON.stringify({ 
+                        error: 'YouTube authentication error', 
+                        message: 'Your YouTube authorization has expired. Please reconnect your account.' 
                     })
                 };
             }
