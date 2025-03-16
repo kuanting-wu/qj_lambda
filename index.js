@@ -8,23 +8,24 @@ const {
   handleForgotPassword,
   handleResetPassword,
   handleViewPost,
+  handleSearch,
   handleViewProfile,
   handleProxyImage,
   handleRefreshToken,
   handleGoogleSignin,
+  handleEditProfile,
   handleNewPost,
   handleEditPost,
   handleDeletePost,
   handleYouTubeAuthUrl,
   handleYouTubeAuthCallback,
   handleYouTubeTokenCheck,
+  handleYouTubeUploadInit,
 } = require('./handlers');
 
-// Import updated handlers that work with the new database schema
-const handleSearch = require('./updates/handle_search');
-const handleEditProfile = require('./updates/handle_edit_profile');
-const handleUploadAvatar = require('./updates/handle_upload_avatar');
-const handleYouTubeUploadInit = require('./updates/handle_youtube_upload');
+
+const handleUploadAvatar = require('./handle_upload_avatar');
+
 
 const {
   createGamePlan,

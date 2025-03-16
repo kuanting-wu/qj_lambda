@@ -8,7 +8,7 @@ const { verifyGoogleToken } = require('./google-auth');
 // Helper function to add CORS headers to all responses
 const corsHeaders = (event) => {
     const origin = event.headers?.origin || event.headers?.Origin || 'http://localhost:8080';
-    
+
     // Define allowed origins
     const allowedOrigins = [
         'http://localhost:8080',
@@ -21,10 +21,10 @@ const corsHeaders = (event) => {
         'https://api.quantifyjiujitsu.com',
         'https://api-staging.quantifyjiujitsu.com'
     ];
-    
+
     // Use the origin if it's in the allowed list, otherwise use a default
     const responseOrigin = allowedOrigins.includes(origin) ? origin : 'https://quantifyjiujitsu.com';
-    
+
     return {
         'Access-Control-Allow-Origin': responseOrigin,
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH',
@@ -53,9 +53,9 @@ const handleSignup = async (event, db) => {
         username = parsedBody.username; // Username field from frontend
         email = parsedBody.email;
         password = parsedBody.password;
-        
+
         console.log(`Signup attempt for username: ${username}, email: ${email}`);
-        
+
         if (!username || !email || !password) {
             console.log("Missing required fields for signup");
             return { statusCode: 400, body: JSON.stringify({ error: 'Username, email, and password are required' }) };
@@ -67,7 +67,7 @@ const handleSignup = async (event, db) => {
 
     try {
         console.log("Starting database check for existing user...");
-        
+
         // Check if email or username already exists - combined into a single query for performance
         let existingRecords;
         try {
@@ -77,24 +77,24 @@ const handleSignup = async (event, db) => {
                     (SELECT COUNT(*) FROM users WHERE email = $1) AS email_count,
                     (SELECT COUNT(*) FROM profiles WHERE username = $2) AS username_count
             `, [email, username]);
-            
+
             existingRecords = queryResult[0];
-            
-            console.log("Database check complete:", 
-                existingRecords && existingRecords[0] ? 
-                    `email_count: ${existingRecords[0].email_count}, username_count: ${existingRecords[0].username_count}` : 
+
+            console.log("Database check complete:",
+                existingRecords && existingRecords[0] ?
+                    `email_count: ${existingRecords[0].email_count}, username_count: ${existingRecords[0].username_count}` :
                     "No results returned"
             );
         } catch (queryError) {
             console.error("Error checking for existing user:", queryError);
             throw queryError; // Re-throw to be caught by outer try-catch
         }
-        
+
         if (existingRecords[0].email_count > 0) {
             console.log("Email already in use");
             return { statusCode: 400, body: JSON.stringify({ error: 'Email is already in use' }) };
         }
-        
+
         if (existingRecords[0].username_count > 0) {
             console.log("Username already in use");
             return { statusCode: 400, body: JSON.stringify({ error: 'Username is already in use' }) };
@@ -109,34 +109,34 @@ const handleSignup = async (event, db) => {
 
         // Set default avatar URL
         const defaultAvatar = 'https://cdn.builder.io/api/v1/image/assets/TEMP/64c9bda73ca89162bc806ea1e084a3cd2dccf15193fe0e3c0e8008a485352e26?placeholderIfAbsent=true&apiKey=ee54480c62b34c3d9ff7ccdcccbf22d1';
-        
+
         let userId;
         // Start transaction - with retries
         let retries = 2;
         while (retries >= 0) {
             try {
                 await db.beginTransaction();
-                
+
                 // Insert user record - use RETURNING in PostgreSQL to get the inserted ID
                 const [userResult] = await db.execute(
                     'INSERT INTO users (email, hashed_password, verification_token, verification_token_expiry, email_verified) VALUES ($1, $2, $3, $4, $5) RETURNING id',
                     [email, hashedPassword, verificationToken, tokenExpiryUTC, false]
                 );
-                
+
                 userId = userResult[0].id;
-                
+
                 // Insert profile record with minimal information - PostgreSQL uses $1, $2 etc. for parameters
                 await db.execute(
                     'INSERT INTO profiles (user_id, username, avatar_url) VALUES ($1, $2, $3)',
                     [userId, username, defaultAvatar]
                 );
-                
+
                 // Commit transaction
                 await db.commit();
                 break; // Success, exit the retry loop
             } catch (txError) {
                 console.warn(`Transaction attempt failed (${retries} retries left): ${txError.message}`);
-                
+
                 // Try to rollback if needed
                 try {
                     if (db && typeof db.rollback === 'function' && db.connection.inTransaction) {
@@ -145,11 +145,11 @@ const handleSignup = async (event, db) => {
                 } catch (rollbackError) {
                     console.error('Rollback error:', rollbackError);
                 }
-                
+
                 if (retries <= 0) {
                     throw txError; // No more retries, propagate the error
                 }
-                
+
                 // Wait a bit before retry (exponential backoff)
                 await new Promise(resolve => setTimeout(resolve, 500 * (2 - retries)));
                 retries--;
@@ -159,69 +159,69 @@ const handleSignup = async (event, db) => {
         // Send verification email with expiration notice
         const verificationLink = `https://quantifyjiujitsu.com/verify-email?token=${verificationToken}`;
         const expiryDate = tokenExpiry.toLocaleString(); // Format the date for user-friendly display
-        
+
         let emailSent = false;
         const emailStartTime = Date.now();
         console.log("Starting email sending process...");
-        
+
         try {
             // Set a timeout for the email operation to prevent Lambda timeout
             const emailTimeoutMs = 1500; // 1.5 seconds max for email (SES has 1 second timeout)
-            
+
             // Define a timeout promise
             const emailTimeoutPromise = new Promise((_, reject) => {
                 setTimeout(() => {
                     reject(new Error(`Email operation timed out after ${emailTimeoutMs}ms`));
                 }, emailTimeoutMs);
             });
-            
+
             // Email sending promise
             const emailPromise = sendEmail(
-                email, 
-                'Verify your email', 
+                email,
+                'Verify your email',
                 `<p>Hi ${username},</p>
                 <p>Click <a href="${verificationLink}">here</a> to verify your email.</p>
                 <p>This verification link will expire in 24 hours (${expiryDate}).</p>
                 <p>If the link expires, you can request a new verification email from the sign-in page.</p>`
             );
-            
+
             // Race the promises
             const emailResult = await Promise.race([emailPromise, emailTimeoutPromise]);
             const emailDuration = Date.now() - emailStartTime;
-            
+
             console.log(`Email sending completed in ${emailDuration}ms`);
             emailSent = emailResult.success;
-            
+
             if (!emailResult.success) {
                 console.warn(`Failed to send verification email to ${email}: ${emailResult.error?.message || 'Unknown error'}`);
             }
         } catch (emailError) {
             const emailDuration = Date.now() - emailStartTime;
             console.error(`Error sending verification email after ${emailDuration}ms:`, emailError.message);
-            
+
             if (emailError.message.includes('timed out')) {
                 console.warn('Email sending was aborted due to timeout - continuing with registration');
             }
-            
+
             // Continue with registration even if email fails
         }
-        
+
         console.log("Email process complete, continuing with response...");
 
         // Log information about the final state
         console.log(`Registration process complete: userId=${userId}, emailSent=${emailSent}`);
-        
-        const responseData = { 
-            message: emailSent ? 
-                'User registered successfully! Check your email.' : 
+
+        const responseData = {
+            message: emailSent ?
+                'User registered successfully! Check your email.' :
                 'User registered successfully! Email verification is temporarily unavailable.',
             email: email,
             userId: userId,
-            requiresVerification: true, 
+            requiresVerification: true,
             verificationSent: emailSent,
             verificationExpiry: tokenExpiry.toISOString()
         };
-        
+
         // Always include email configuration status for now to help with debugging
         responseData.debug = {
             ses_email_from_set: Boolean(process.env.SES_EMAIL_FROM),
@@ -230,10 +230,10 @@ const handleSignup = async (event, db) => {
             verification_token: verificationToken, // Include token for testing
             verification_link: verificationLink // Include link for testing
         };
-        
+
         console.log("Returning registration response");
-        return { 
-            statusCode: 201, 
+        return {
+            statusCode: 201,
             body: JSON.stringify(responseData)
         };
     } catch (error) {
@@ -246,7 +246,7 @@ const handleSignup = async (event, db) => {
         } catch (rollbackError) {
             console.error('Rollback error:', rollbackError);
         }
-        
+
         // Detailed error logging
         console.error('Signup error:', error);
         console.error('Error details:', {
@@ -256,15 +256,15 @@ const handleSignup = async (event, db) => {
             queryError: error.query || 'No query info',
             params: error.params || 'No params info'
         });
-        
+
         // Return more specific error message for debugging
-        return { 
-            statusCode: 500, 
-            body: JSON.stringify({ 
+        return {
+            statusCode: 500,
+            body: JSON.stringify({
                 error: 'Failed to register user',
                 message: process.env.NODE_ENV === 'development' ? error.message : undefined,
                 code: process.env.NODE_ENV === 'development' ? error.code : undefined
-            }) 
+            })
         };
     }
 };
@@ -287,8 +287,8 @@ const handleSignin = async (event, db) => {
             // Get username for the error response
             const [profileResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [users[0].id]);
             const username = profileResult.length > 0 ? profileResult[0].username : '';
-            
-            return { 
+
+            return {
                 statusCode: 403, // Forbidden is more appropriate here
                 body: JSON.stringify({
                     error: 'Please verify your email first',
@@ -309,17 +309,17 @@ const handleSignin = async (event, db) => {
         const avatar_url = profileResult.length > 0 ? profileResult[0].avatar_url : null;
 
         // Generate access token using user data including avatar URL
-        const accessToken = generateAccessToken({ 
-            user_id: user.id, 
-            username: username, 
+        const accessToken = generateAccessToken({
+            user_id: user.id,
+            username: username,
             email: user.email,
             avatar_url: avatar_url
         });
 
         // Generate refresh token using user data including avatar URL
-        const refreshToken = generateRefreshToken({ 
-            user_id: user.id, 
-            username: username, 
+        const refreshToken = generateRefreshToken({
+            user_id: user.id,
+            username: username,
             email: user.email,
             avatar_url: avatar_url
         });
@@ -336,9 +336,9 @@ const handleSignin = async (event, db) => {
         };
     } catch (error) {
         console.error('Signin error:', error);
-        return { 
-            statusCode: 500, 
-            body: JSON.stringify({ error: 'An error occurred during sign in' }) 
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: 'An error occurred during sign in' })
         };
     }
 };
@@ -347,10 +347,10 @@ const handleSignin = async (event, db) => {
 const handleVerifyEmail = async (event, db) => {
     console.log("Email verification handler called with event:", JSON.stringify(event));
     console.log("Query parameters:", JSON.stringify(event.queryStringParameters));
-    
+
     // Safely extract token
     const token = event.queryStringParameters?.token;
-    
+
     console.log("Extracted token:", token);
 
     // Check if the token is provided
@@ -361,13 +361,13 @@ const handleVerifyEmail = async (event, db) => {
 
     try {
         console.log(`Looking up user with token: ${token}`);
-        
+
         // First, try to find the user with this token regardless of expiry
         const [usersWithToken] = await db.execute(
             'SELECT id, email, verification_token_expiry, email_verified FROM users WHERE verification_token = $1',
             [token]
         );
-        
+
         console.log(`Database query complete, found ${usersWithToken.length} users with this token`);
         if (usersWithToken.length > 0) {
             console.log("User details:", JSON.stringify({
@@ -386,43 +386,43 @@ const handleVerifyEmail = async (event, db) => {
                 const [allTokens] = await db.execute(
                     'SELECT email, verification_token FROM users WHERE verification_token IS NOT NULL LIMIT 5'
                 );
-                console.log(`Found ${allTokens.length} users with tokens. Sample tokens:`, 
-                    allTokens.map(u => ({email: u.email, token_fragment: u.verification_token?.substring(0, 8) + '...' }))
+                console.log(`Found ${allTokens.length} users with tokens. Sample tokens:`,
+                    allTokens.map(u => ({ email: u.email, token_fragment: u.verification_token?.substring(0, 8) + '...' }))
                 );
             } catch (debugError) {
                 console.error("Error in debug query:", debugError);
             }
-            
+
             return { statusCode: 400, body: JSON.stringify({ error: 'Invalid verification token' }) };
         }
 
         const user = usersWithToken[0];
-        
+
         // If the user is already verified, return success
         if (user.email_verified) {
             return { statusCode: 200, body: JSON.stringify({ message: 'Email already verified!' }) };
         }
-        
+
         // Check if the token is expired
         const now = new Date();
         const tokenExpiry = new Date(user.verification_token_expiry);
-        
+
         if (now > tokenExpiry) {
             // Token has expired
-            return { 
+            return {
                 statusCode: 410, // Gone status code for expired resource
-                body: JSON.stringify({ 
-                    error: 'Verification token has expired', 
+                body: JSON.stringify({
+                    error: 'Verification token has expired',
                     userId: user.id,
                     email: user.email,
                     expired: true
-                }) 
+                })
             };
         }
 
         // Token is valid and not expired - update the user's email verification status
         console.log(`Verifying email for user ${user.id} with token ${token}`);
-        
+
         try {
             await db.execute(
                 'UPDATE users SET email_verified = TRUE, verification_token = NULL, verification_token_expiry = NULL WHERE id = $1',
@@ -436,11 +436,12 @@ const handleVerifyEmail = async (event, db) => {
 
         // Return success response
         console.log("Returning success response");
-        return { statusCode: 200, body: JSON.stringify({ 
-            message: 'Email verified successfully!',
-            email: user.email,
-            verified: true 
-        })
+        return {
+            statusCode: 200, body: JSON.stringify({
+                message: 'Email verified successfully!',
+                email: user.email,
+                verified: true
+            })
         };
     } catch (error) {
         console.error('Error verifying email:', error);
@@ -451,67 +452,67 @@ const handleVerifyEmail = async (event, db) => {
 // Handle Resend Verification Email
 const handleResendVerification = async (event, db) => {
     const { email } = JSON.parse(event.body);
-    
+
     if (!email) {
         return { statusCode: 400, body: JSON.stringify({ error: 'Email is required' }) };
     }
-    
+
     try {
         // Check if user exists and isn't already verified
         const [users] = await db.execute(
             'SELECT id, username, email_verified FROM users u JOIN profiles p ON u.id = p.user_id WHERE u.email = $1',
             [email]
         );
-        
+
         if (users.length === 0) {
             return { statusCode: 404, body: JSON.stringify({ error: 'User not found' }) };
         }
-        
+
         const user = users[0];
-        
+
         // If already verified, return success
         if (user.email_verified) {
             return { statusCode: 200, body: JSON.stringify({ message: 'Email already verified!' }) };
         }
-        
+
         // Generate new verification token
         const verificationToken = uuidv7();
         const tokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // Token expires in 24 hours
         const tokenExpiryUTC = tokenExpiry.toISOString();
-        
+
         // Update user with new token
         await db.execute(
             'UPDATE users SET verification_token = $1, verification_token_expiry = $2 WHERE id = $3',
             [verificationToken, tokenExpiryUTC, user.id]
         );
-        
+
         // Send verification email
         const verificationLink = `https://quantifyjiujitsu.com/verify-email?token=${verificationToken}`;
-        
+
         let emailSent = false;
         try {
             const emailResult = await sendEmail(
-                email, 
-                'Verify your email', 
+                email,
+                'Verify your email',
                 `<p>Hi ${user.username},</p><p>Please click <a href="${verificationLink}">here</a> to verify your email.</p><p>This link will expire in 24 hours.</p>`
             );
             emailSent = emailResult.success;
-            
+
             if (!emailResult.success) {
                 console.warn(`Failed to send verification email to ${email}: ${emailResult.error?.message || 'Unknown error'}`);
             }
         } catch (emailError) {
             console.error('Error sending verification email:', emailError);
         }
-        
-        return { 
-            statusCode: 200, 
-            body: JSON.stringify({ 
-                message: emailSent ? 
-                    'Verification email resent successfully!' : 
+
+        return {
+            statusCode: 200,
+            body: JSON.stringify({
+                message: emailSent ?
+                    'Verification email resent successfully!' :
                     'Verification token updated, but email sending is temporarily unavailable.',
                 emailSent
-            }) 
+            })
         };
     } catch (error) {
         console.error('Error resending verification email:', error);
@@ -567,10 +568,10 @@ const handleForgotPassword = async (event, db) => {
             if (emailResponse.success) {
                 return {
                     statusCode: 200,
-                    body: JSON.stringify({ 
+                    body: JSON.stringify({
                         message: 'Password reset email sent successfully!',
                         token: resetToken, // Include token in development for testing
-                        expires: tokenExpiryUTC 
+                        expires: tokenExpiryUTC
                     }),
                 };
             } else {
@@ -578,7 +579,7 @@ const handleForgotPassword = async (event, db) => {
                 console.warn(`Failed to send password reset email: ${emailResponse.error?.message || 'Unknown error'}`);
                 return {
                     statusCode: 200, // Still return 200 to avoid revealing email existence
-                    body: JSON.stringify({ 
+                    body: JSON.stringify({
                         message: 'If an account exists with this email, a reset token has been generated.',
                         emailFailure: true,
                         // Only include token if in development mode
@@ -591,7 +592,7 @@ const handleForgotPassword = async (event, db) => {
             console.error('Error sending password reset email:', emailError);
             return {
                 statusCode: 200, // Still return 200 to avoid revealing email existence
-                body: JSON.stringify({ 
+                body: JSON.stringify({
                     message: 'If an account exists with this email, a reset token has been generated.',
                     emailFailure: true,
                     // Only include token if in development mode
@@ -700,7 +701,7 @@ const handleViewPost = async (event, db) => {
         }
 
         const post = results[0];
-        
+
         // If there's a markdown notes path, get the full URL
         if (post.notes_path) {
             try {
@@ -718,7 +719,7 @@ const handleViewPost = async (event, db) => {
         // Return the post data
         return {
             statusCode: 200,
-            body: JSON.stringify(post), 
+            body: JSON.stringify(post),
         };
     } catch (error) {
         console.error('Error fetching post:', error);
@@ -750,7 +751,7 @@ const handleViewProfile = async (event, db) => {
 // Handle Search
 const handleSearch = async (event, db) => {
     console.log("Search handler called with parameters:", JSON.stringify(event.queryStringParameters));
-    
+
     // Extract query parameters with defaults
     const {
         search = '',
@@ -767,10 +768,10 @@ const handleSearch = async (event, db) => {
         sortOption = 'newToOld',
     } = event.queryStringParameters || {};
 
-    console.log("Extracted parameters:", { 
-        search, postBy, movementType, startingPosition, 
+    console.log("Extracted parameters:", {
+        search, postBy, movementType, startingPosition,
         endingPosition, startingTopBottom, endingTopBottom,
-        giNogi, practitioner, publicStatus, language, sortOption 
+        giNogi, practitioner, publicStatus, language, sortOption
     });
 
     const sortOrder = sortOption === 'oldToNew' ? 'ASC' : 'DESC';
@@ -778,19 +779,19 @@ const handleSearch = async (event, db) => {
     // Get the current user from the event (simulating the authenticated user)
     const currentUser = event.requestContext?.authorizer?.username || null;
     const currentUserId = event.requestContext?.authorizer?.user_id || null;
-    
+
     console.log("Current user context:", { currentUser, currentUserId });
 
     try {
         // If postBy (username) parameter is provided, find the corresponding user_id first
         let ownerUserId = null;
-        
+
         if (postBy) {
             const [userResult] = await db.execute(
                 'SELECT user_id FROM profiles WHERE username = $1',
                 [postBy]
             );
-            
+
             if (userResult.length > 0) {
                 ownerUserId = userResult[0].user_id;
                 console.log(`Found user_id ${ownerUserId} for username "${postBy}"`);
@@ -807,63 +808,113 @@ const handleSearch = async (event, db) => {
             }
         }
 
-        // Query using a join between posts and profiles tables
-        const query = `
-          SELECT 
-            p.id,
-            p.video_id,
-            p.video_platform,
-            p.title,
-            pr.username,  -- Get username from profiles
-            p.gi_nogi,
-            p.practitioner,
-            p.starting_top_bottom,
-            p.ending_top_bottom,
-            pr.belt,
-            pr.academy,
-            pr.avatar_url,
-            p.movement_type,
-            p.created_at
-          FROM 
-            posts p
-          JOIN 
-            profiles pr ON p.owner_id = pr.user_id
-          WHERE 1=1
-            ${search ? 'AND (LOWER(p.title) LIKE LOWER($1) OR LOWER(p.practitioner) LIKE LOWER($1))' : ''}
-            ${ownerUserId ? 'AND p.owner_id = $2' : ''}
-            ${movementType ? `AND LOWER(p.movement_type) LIKE LOWER($${ownerUserId ? 3 : 2})` : ''}
-            ${startingPosition ? `AND LOWER(p.starting_position) LIKE LOWER($${ownerUserId ? 4 : 3})` : ''}
-            ${endingPosition ? `AND LOWER(p.ending_position) LIKE LOWER($${ownerUserId ? 5 : 4})` : ''}
-            ${startingTopBottom ? `AND LOWER(p.starting_top_bottom::text) = LOWER($${ownerUserId ? 6 : 5})` : ''}
-            ${endingTopBottom ? `AND LOWER(p.ending_top_bottom::text) = LOWER($${ownerUserId ? 7 : 6})` : ''}
-            ${giNogi ? `AND LOWER(p.gi_nogi) = LOWER($${ownerUserId ? 8 : 7})` : ''}
-            ${practitioner ? `AND LOWER(p.practitioner) LIKE LOWER($${ownerUserId ? 9 : 8})` : ''}
-            ${language ? `AND LOWER(p.language) LIKE LOWER($${ownerUserId ? 10 : 9})` : ''}
-            ${publicStatus ? `AND LOWER(p.public_status) = LOWER($${ownerUserId ? 11 : 10})` : ''}
-            ${!publicStatus ? `AND (
-              LOWER(p.public_status) = 'public' OR 
-              LOWER(p.public_status) = 'subscribers' OR
-              (LOWER(p.public_status) = 'private' AND p.owner_id = $${ownerUserId ? 12 : 11})
-            )` : ''}
-          ORDER BY p.created_at ${sortOrder}
-        `;
+        // Build query conditions based on filters
+        const conditions = [];
+        const queryParams = [];
+        let paramCounter = 1;
 
-        // Simplified approach: build parameters more directly
-        const params = [];
-        
-        // Always add the owner user ID if it exists (position $1 or $2)
-        if (ownerUserId) {
-            params.push(ownerUserId);
+        // Handle the full-text search
+        if (search && search.trim() !== '') {
+            conditions.push(`p.search_vector @@ plainto_tsquery('english', $${paramCounter})`);
+            queryParams.push(search.trim());
+            paramCounter++;
         }
-        
-        // Always add the current user ID for permission checks
-        params.push(currentUserId || 0);
-        
-        // Log simplified query information
-        console.log(`Using search parameters: search=${search}, ownerUserId=${ownerUserId}, currentUserId=${currentUserId || 0}`);
-        
-        // Build a simplified query that fixes the parameter positioning issue
-        const simplifiedQuery = `
+
+        // Filter by user if specified
+        if (ownerUserId) {
+            conditions.push(`p.owner_id = $${paramCounter}`);
+            queryParams.push(ownerUserId);
+            paramCounter++;
+        }
+
+        // Add other filter conditions
+        if (movementType) {
+            conditions.push(`p.movement_type = $${paramCounter}`);
+            queryParams.push(movementType);
+            paramCounter++;
+        }
+
+        if (startingPosition) {
+            conditions.push(`p.starting_position = $${paramCounter}`);
+            queryParams.push(startingPosition);
+            paramCounter++;
+        }
+
+        if (endingPosition) {
+            conditions.push(`p.ending_position = $${paramCounter}`);
+            queryParams.push(endingPosition);
+            paramCounter++;
+        }
+
+        if (startingTopBottom) {
+            conditions.push(`p.starting_top_bottom = $${paramCounter}`);
+            queryParams.push(startingTopBottom);
+            paramCounter++;
+        }
+
+        if (endingTopBottom) {
+            conditions.push(`p.ending_top_bottom = $${paramCounter}`);
+            queryParams.push(endingTopBottom);
+            paramCounter++;
+        }
+
+        if (giNogi) {
+            conditions.push(`p.gi_nogi = $${paramCounter}`);
+            queryParams.push(giNogi);
+            paramCounter++;
+        }
+
+        if (practitioner) {
+            conditions.push(`p.practitioner ILIKE $${paramCounter}`);
+            queryParams.push(`%${practitioner}%`);
+            paramCounter++;
+        }
+
+        if (publicStatus) {
+            conditions.push(`p.public_status = $${paramCounter}`);
+            queryParams.push(publicStatus);
+            paramCounter++;
+        }
+
+        if (language) {
+            conditions.push(`p.language = $${paramCounter}`);
+            queryParams.push(language);
+            paramCounter++;
+        }
+
+        // Add privacy conditions (always include)
+        const privacyCondition = `(
+            p.public_status = 'public' OR 
+            p.public_status = 'subscribers' OR
+            (p.public_status = 'private' AND p.owner_id = $${paramCounter})
+        )`;
+        conditions.push(privacyCondition);
+        queryParams.push(currentUserId || 0);
+        paramCounter++;
+
+        // Build the WHERE clause
+        const whereClause = conditions.length > 0
+            ? `WHERE ${conditions.join(' AND ')}`
+            : '';
+
+        // Determine ranking/sorting
+        let orderByClause = '';
+        if (search && search.trim() !== '') {
+            // If search is provided, rank results by relevance first, then by date
+            // We need to reuse the same search text parameter for ranking that we used for filtering
+            const searchParamIndex = queryParams.findIndex(param => param === search.trim()) + 1;
+            orderByClause = `
+                ORDER BY 
+                    ts_rank(p.search_vector, plainto_tsquery('english', $${searchParamIndex})) DESC,
+                    p.created_at ${sortOrder}
+            `;
+        } else {
+            // Otherwise, just sort by date
+            orderByClause = `ORDER BY p.created_at ${sortOrder}`;
+        }
+
+        // Complete query with all filters
+        const fullQuery = `
           SELECT 
             p.id,
             p.video_id,
@@ -874,6 +925,8 @@ const handleSearch = async (event, db) => {
             p.practitioner,
             p.starting_top_bottom,
             p.ending_top_bottom,
+            p.starting_position,
+            p.ending_position,
             pr.belt,
             pr.academy,
             pr.avatar_url,
@@ -883,26 +936,18 @@ const handleSearch = async (event, db) => {
             posts p
           JOIN 
             profiles pr ON p.owner_id = pr.user_id
-          WHERE 1=1
-            ${ownerUserId ? 'AND p.owner_id = $1' : ''}
-            AND (
-              p.public_status = 'public' OR 
-              p.public_status = 'subscribers' OR
-              (p.public_status = 'private' AND p.owner_id = $${ownerUserId ? 2 : 1})
-            )
-          ORDER BY p.created_at ${sortOrder}
+          ${whereClause}
+          ${orderByClause}
+          LIMIT 100
         `;
-        
-        console.log("Using simplified query:", simplifiedQuery);
 
-        console.log("Executing simplified query with params:", {
-            query: simplifiedQuery.replace(/\s+/g, ' ').trim(),
-            parameters: params
-        });
+        // Log query and parameters
+        console.log("Executing search query:", fullQuery);
+        console.log("With parameters:", queryParams);
 
-        // Execute the simplified query
-        const [results] = await db.execute(simplifiedQuery, params);
-        console.log(`Query returned ${results.length} results`);
+        // Execute the query
+        const [results] = await db.execute(fullQuery, queryParams);
+        console.log(`Found ${results.length} results`);
 
         // Format the results
         const formattedResults = results.map(post => ({
@@ -913,6 +958,8 @@ const handleSearch = async (event, db) => {
             username: post.username,
             gi_nogi: post.gi_nogi,
             practitioner: post.practitioner,
+            starting_position: post.starting_position,
+            ending_position: post.ending_position,
             starting_top_bottom: post.starting_top_bottom,
             ending_top_bottom: post.ending_top_bottom,
             belt: post.belt,
@@ -925,24 +972,23 @@ const handleSearch = async (event, db) => {
         // Return the formatted results
         return {
             statusCode: 200,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 posts: formattedResults,
                 count: formattedResults.length
             }),
         };
-
     } catch (error) {
-        console.error('Error fetching posts:', error);
+        console.error("Error executing search:", error);
         console.error('Error details:', {
             message: error.message,
             stack: error.stack,
             code: error.code,
             query: error.query
         });
-        
+
         return {
             statusCode: 500,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 error: 'Failed to fetch posts',
                 details: process.env.NODE_ENV === 'development' ? error.message : undefined,
                 code: process.env.NODE_ENV === 'development' ? error.code : undefined
@@ -998,27 +1044,27 @@ const handleRefreshToken = async (event, db) => {
         const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
         // Generate a new access token using the data from the refresh token
-        const newAccessToken = generateAccessToken({ 
-            user_id: decoded.user_id, 
-            username: decoded.username, 
+        const newAccessToken = generateAccessToken({
+            user_id: decoded.user_id,
+            username: decoded.username,
             email: decoded.email,
             avatar_url: decoded.avatar_url || null
         });
 
         return {
             statusCode: 200,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 accessToken: newAccessToken,
-                message: "Token refreshed successfully" 
+                message: "Token refreshed successfully"
             }),
         };
     } catch (error) {
         console.error("Invalid or expired refresh token:", error);
         return {
             statusCode: 403,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 error: "Invalid or expired refresh token",
-                details: error.message 
+                details: error.message
             }),
         };
     }
@@ -1028,57 +1074,57 @@ const handleRefreshToken = async (event, db) => {
 const handleGoogleSignin = async (event, db) => {
     try {
         const { idToken, username } = JSON.parse(event.body);
-        
+
         if (!idToken) {
-            return { 
-                statusCode: 400, 
-                body: JSON.stringify({ error: 'Google ID token is required' }) 
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'Google ID token is required' })
             };
         }
-        
+
         // Verify the Google token
         const googleUser = await verifyGoogleToken(idToken);
         const { googleId, email, emailVerified, picture } = googleUser;
-        
+
         // Check if any validation issues
         if (!email) {
-            return { 
-                statusCode: 400, 
-                body: JSON.stringify({ error: 'Email is required from Google authentication' }) 
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'Email is required from Google authentication' })
             };
         }
-        
+
         // Start database transaction
         await db.beginTransaction();
-        
+
         // Check if user already exists with this Google ID or email
         const [existingUsers] = await db.execute(
-            'SELECT * FROM users WHERE google_id = $1 OR email = $2', 
+            'SELECT * FROM users WHERE google_id = $1 OR email = $2',
             [googleId, email]
         );
-        
+
         let userId;
         let requiresUsername = false;
         let userUsername = null;
         let userAvatar = null;
-        
+
         if (existingUsers.length > 0) {
             // Existing user - update the Google tokens
             const user = existingUsers[0];
             userId = user.id;
-            
+
             // Update Google information
             await db.execute(
                 'UPDATE users SET google_id = $1, email_verified = $2 WHERE id = $3',
                 [googleId, emailVerified, userId]
             );
-            
+
             // Check if user has a profile with username and avatar
             const [profileResult] = await db.execute(
-                'SELECT username, avatar_url FROM profiles WHERE user_id = $1', 
+                'SELECT username, avatar_url FROM profiles WHERE user_id = $1',
                 [userId]
             );
-            
+
             if (profileResult.length > 0) {
                 userUsername = profileResult[0].username;
                 userAvatar = profileResult[0].avatar_url;
@@ -1091,11 +1137,11 @@ const handleGoogleSignin = async (event, db) => {
                 'INSERT INTO users (email, google_id, email_verified) VALUES ($1, $2, $3) RETURNING id',
                 [email, googleId, emailVerified]
             );
-            
+
             userId = insertResult[0].id;
             requiresUsername = true;
         }
-        
+
         // Handle username requirement cases
         if (requiresUsername) {
             if (!username) {
@@ -1105,7 +1151,7 @@ const handleGoogleSignin = async (event, db) => {
                 } catch (rollbackError) {
                     console.error('Rollback error:', rollbackError);
                 }
-                
+
                 return {
                     statusCode: 428, // Precondition Required
                     body: JSON.stringify({
@@ -1118,20 +1164,20 @@ const handleGoogleSignin = async (event, db) => {
                     })
                 };
             }
-            
+
             // Verify username doesn't already exist
             const [usernameCheck] = await db.execute(
                 'SELECT username FROM profiles WHERE username = $1',
                 [username]
             );
-            
+
             if (usernameCheck.length > 0) {
                 try {
                     await db.rollback();
                 } catch (rollbackError) {
                     console.error('Rollback error:', rollbackError);
                 }
-                
+
                 return {
                     statusCode: 409, // Conflict
                     body: JSON.stringify({
@@ -1141,19 +1187,19 @@ const handleGoogleSignin = async (event, db) => {
                     })
                 };
             }
-            
+
             // Create profile with the provided username
             const defaultAvatar = picture || 'https://cdn.builder.io/api/v1/image/assets/TEMP/64c9bda73ca89162bc806ea1e084a3cd2dccf15193fe0e3c0e8008a485352e26?placeholderIfAbsent=true&apiKey=ee54480c62b34c3d9ff7ccdcccbf22d1';
-            
+
             await db.execute(
                 'INSERT INTO profiles (user_id, username, avatar_url) VALUES ($1, $2, $3)',
                 [userId, username, defaultAvatar]
             );
-            
+
             userUsername = username;
             userAvatar = defaultAvatar;
         }
-        
+
         // Generate auth tokens
         const accessToken = generateAccessToken({
             user_id: userId,
@@ -1161,17 +1207,17 @@ const handleGoogleSignin = async (event, db) => {
             email,
             avatar_url: userAvatar
         });
-        
+
         const refreshToken = generateRefreshToken({
             user_id: userId,
             username: userUsername,
             email,
             avatar_url: userAvatar
         });
-        
+
         // Commit the transaction
         await db.commit();
-        
+
         return {
             statusCode: 200,
             body: JSON.stringify({
@@ -1184,7 +1230,7 @@ const handleGoogleSignin = async (event, db) => {
                 message: 'Google sign-in successful'
             })
         };
-        
+
     } catch (error) {
         // Rollback transaction if active
         try {
@@ -1194,16 +1240,16 @@ const handleGoogleSignin = async (event, db) => {
         } catch (rollbackError) {
             console.error('Rollback error:', rollbackError);
         }
-        
+
         console.error('Google sign-in error:', error);
-        
+
         if (error.message === 'Invalid Google token') {
             return {
                 statusCode: 401,
                 body: JSON.stringify({ error: 'Invalid Google token' })
             };
         }
-        
+
         return {
             statusCode: 500,
             body: JSON.stringify({ error: 'An error occurred during Google sign-in' })
@@ -1215,16 +1261,16 @@ const handleGoogleSignin = async (event, db) => {
 const handleEditProfile = async (event, db, user) => {
     console.log("Edit profile handler called", { pathParameters: event.pathParameters, user });
     const user_id = event.pathParameters.user_id; // Extract user_id from URL path
-    
+
     try {
         // Parse the request body and extract all fields
-        const { 
+        const {
             username: new_username, // Frontend might send username directly
-            name, // New name field (not unique)
+            name, // Name field (not unique)
             belt, academy, bio, location, nationality, weight_class, height, date_of_birth,
             social_links, achievements, website_url, contact_email, avatar_url
         } = JSON.parse(event.body);
-        
+
         console.log("Profile update data:", { path_user_id: user_id, auth_user_id: user.user_id, username: user.username });
 
         // Check if the authenticated user is trying to edit their own profile
@@ -1247,90 +1293,92 @@ const handleEditProfile = async (event, db, user) => {
                 await db.beginTransaction();
                 console.log("Transaction started for username change");
             }
-            
+
             // Add all potential fields to update
-            if (belt !== undefined) { 
-                updates.push(`belt = $${paramCounter++}`); 
-                params.push(belt); 
+            if (belt !== undefined) {
+                updates.push(`belt = $${paramCounter++}`);
+                params.push(belt);
             }
-            
-            if (academy !== undefined) { 
-                updates.push(`academy = $${paramCounter++}`); 
-                params.push(academy); 
+
+            if (academy !== undefined) {
+                updates.push(`academy = $${paramCounter++}`);
+                params.push(academy);
             }
-            
-            if (bio !== undefined) { 
-                updates.push(`bio = $${paramCounter++}`); 
-                params.push(bio); 
+
+            if (bio !== undefined) {
+                updates.push(`bio = $${paramCounter++}`);
+                params.push(bio);
             }
-            
-            if (location !== undefined) { 
-                updates.push(`location = $${paramCounter++}`); 
-                params.push(location); 
+
+            if (location !== undefined) {
+                updates.push(`location = $${paramCounter++}`);
+                params.push(location);
             }
-            
-            if (nationality !== undefined) { 
-                updates.push(`nationality = $${paramCounter++}`); 
-                params.push(nationality); 
+
+            if (nationality !== undefined) {
+                updates.push(`nationality = $${paramCounter++}`);
+                params.push(nationality);
             }
-            
-            if (weight_class !== undefined) { 
-                updates.push(`weight_class = $${paramCounter++}`); 
-                params.push(weight_class); 
+
+            if (weight_class !== undefined) {
+                updates.push(`weight_class = $${paramCounter++}`);
+                params.push(weight_class);
             }
-            
-            if (height !== undefined) { 
-                updates.push(`height = $${paramCounter++}`); 
-                params.push(height); 
+
+            if (height !== undefined) {
+                updates.push(`height = $${paramCounter++}`);
+                params.push(height);
             }
-            
-            if (date_of_birth !== undefined) { 
-                updates.push(`date_of_birth = $${paramCounter++}`); 
-                params.push(date_of_birth); 
+
+            if (date_of_birth !== undefined) {
+                updates.push(`date_of_birth = $${paramCounter++}`);
+                params.push(date_of_birth);
             }
-            
-            if (social_links !== undefined) { 
-                updates.push(`social_links = $${paramCounter++}`); 
-                // Handle social_links based on type - frontend may already send it as a string
-                const socialLinksValue = typeof social_links === 'string' 
-                    ? social_links  // Already a JSON string
-                    : JSON.stringify(social_links); // Convert object to JSON string
-                params.push(socialLinksValue); 
+
+            if (social_links !== undefined) {
+                // Process social links - either store as JSON or as stringified JSON
+                if (typeof social_links === 'string') {
+                    updates.push(`social_links = $${paramCounter++}`);
+                    params.push(social_links);
+                } else if (typeof social_links === 'object') {
+                    updates.push(`social_links = $${paramCounter++}`);
+                    params.push(JSON.stringify(social_links));
+                }
             }
-            
-            if (achievements !== undefined) { 
-                updates.push(`achievements = $${paramCounter++}`); 
-                params.push(achievements); 
+
+            if (achievements !== undefined) {
+                updates.push(`achievements = $${paramCounter++}`);
+                params.push(achievements);
             }
-            
-            if (website_url !== undefined) { 
-                updates.push(`website_url = $${paramCounter++}`); 
-                params.push(website_url); 
+
+            if (website_url !== undefined) {
+                updates.push(`website_url = $${paramCounter++}`);
+                params.push(website_url);
             }
-            
-            if (contact_email !== undefined) { 
-                updates.push(`contact_email = $${paramCounter++}`); 
-                params.push(contact_email); 
+
+            if (contact_email !== undefined) {
+                updates.push(`contact_email = $${paramCounter++}`);
+                params.push(contact_email);
             }
-            
-            if (avatar_url !== undefined) { 
-                updates.push(`avatar_url = $${paramCounter++}`); 
-                params.push(avatar_url); 
+
+            if (avatar_url !== undefined) {
+                updates.push(`avatar_url = $${paramCounter++}`);
+                params.push(avatar_url);
             }
-            
-            if (name !== undefined) { 
-                updates.push(`name = $${paramCounter++}`); 
-                params.push(name); 
+
+            if (name !== undefined) {
+                updates.push(`name = $${paramCounter++}`);
+                params.push(name);
             }
-            
+
             // Handle username change separately
             if (new_username && new_username !== user.username) {
                 // Check if the new username is already taken
                 const [usernameCheck] = await db.execute(
-                    'SELECT username FROM profiles WHERE username = $1 AND username != $2', 
+                    'SELECT username FROM profiles WHERE username = $1 AND username != $2',
                     [new_username, user.username]
                 );
-                
+
                 if (usernameCheck.length > 0) {
                     if (db.connection.inTransaction) {
                         await db.rollback();
@@ -1340,25 +1388,24 @@ const handleEditProfile = async (event, db, user) => {
                         body: JSON.stringify({ error: 'Username already taken' })
                     };
                 }
-                
+
                 // Start transaction if not already in one
                 if (!db.connection.inTransaction) {
                     await db.beginTransaction();
                     console.log("Transaction started for username change");
                 }
-                
-                // With the migration to owner_id, we don't need to update posts when username changes
-                // The posts are linked to the user's ID which doesn't change
-                console.log(`Username change from ${user.username} to ${new_username} - no post updates needed since we use owner_id now`);
-                
+
+                // No need to update posts.owner_name anymore since we're using owner_id
+                // Just update the username in the profiles table
+
                 updates.push(`username = $${paramCounter++}`);
                 params.push(new_username);
                 console.log(`Username change requested: ${user.username} → ${new_username}`);
             }
-            
+
             // Always add updated_at
             updates.push('updated_at = CURRENT_TIMESTAMP');
-            
+
             // If no fields to update, return
             if (updates.length === 0) {
                 return {
@@ -1370,10 +1417,10 @@ const handleEditProfile = async (event, db, user) => {
             // Build and execute query with PostgreSQL parameters - use user_id instead of username
             const query = `UPDATE profiles SET ${updates.join(', ')} WHERE user_id = $${paramCounter}`;
             params.push(user.user_id); // Use user_id from the authenticated user for better reliability
-            
+
             console.log("Executing update query:", { query, params });
             const [results] = await db.execute(query, params);
-            
+
             // Check if the profile was updated
             if (results.affectedRows === 0) {
                 if (db.connection.inTransaction) {
@@ -1389,60 +1436,68 @@ const handleEditProfile = async (event, db, user) => {
             let updatedTokens = {};
             if (new_username && new_username !== user.username) {
                 console.log(`Username changed from ${user.username} to ${new_username}, generating new tokens`);
-                
-                // Generate new tokens with updated username
-                const { generateAccessToken, generateRefreshToken } = require('./auth');
-                
+
+                // Get the current avatar URL
+                const [profileInfo] = await db.execute(
+                    'SELECT avatar_url FROM profiles WHERE user_id = $1',
+                    [user.user_id]
+                );
+
+                const avatarUrl = profileInfo.length > 0 ? profileInfo[0].avatar_url : null;
+
+                // Create new tokens with the updated username and avatar URL
                 const accessToken = generateAccessToken({
                     user_id: user.user_id,
                     username: new_username,
-                    email: user.email
+                    email: user.email,
+                    avatar_url: avatarUrl
                 });
-                
+
                 const refreshToken = generateRefreshToken({
                     user_id: user.user_id,
                     username: new_username,
-                    email: user.email
+                    email: user.email,
+                    avatar_url: avatarUrl
                 });
-                
+
                 updatedTokens = {
                     accessToken,
                     refreshToken
                 };
             }
 
-            // Commit transaction if one is in progress
+            // Commit the transaction if in one
             if (db.connection.inTransaction) {
                 await db.commit();
                 console.log("Transaction committed successfully");
             }
 
+            // Return success with new tokens if username was changed
             return {
                 statusCode: 200,
-                body: JSON.stringify({ 
+                body: JSON.stringify({
                     message: 'Profile updated successfully',
-                    username: new_username || user.username,
+                    usernameChanged: new_username && new_username !== user.username,
                     ...updatedTokens
                 })
             };
-        } catch (innerError) {
-            // Rollback transaction if in progress
+
+        } catch (error) {
+            // Rollback the transaction if in one
             if (db.connection.inTransaction) {
-                try {
-                    await db.rollback();
-                    console.log("Transaction rolled back due to error");
-                } catch (rollbackError) {
-                    console.error("Rollback error:", rollbackError);
-                }
+                await db.rollback();
+                console.log("Transaction rolled back due to error:", error.message);
             }
-            
-            throw innerError; // Re-throw to be caught by outer catch block
+            throw error; // Re-throw for the outer catch block
         }
     } catch (error) {
-        console.error('Error updating profile:', error);
+        console.error("Error updating profile:", error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: 'Server error' })
+            body: JSON.stringify({
+                error: 'Failed to update profile',
+                details: error.message
+            })
         };
     }
 };
@@ -1451,7 +1506,7 @@ const handleEditProfile = async (event, db, user) => {
 const handleNewPost = async (event, db, user) => {
     const { uploadMarkdownToS3 } = require('./s3-helper');
     let { title, video_id, video_platform, movement_type, starting_position, ending_position, starting_top_bottom, ending_top_bottom, gi_nogi, practitioner, sequence_start_time, public_status, language, notes } = JSON.parse(event.body);
-    
+
     // Generate a new UUIDv7 for the post (time-ordered)
     const id = uuidv7();
 
@@ -1525,17 +1580,17 @@ const handleNewPost = async (event, db, user) => {
     try {
         // First, get the username for the current user
         const [userResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [user.user_id]);
-        
+
         if (userResult.length === 0) {
             return {
                 statusCode: 404,
                 body: JSON.stringify({ error: 'User profile not found' })
             };
         }
-        
+
         const username = userResult[0].username;
         let notesPath = null;
-        
+
         // If notes are provided, upload them to S3
         if (notes && notes.trim() !== '') {
             try {
@@ -1603,7 +1658,7 @@ const handleNewPost = async (event, db, user) => {
         // Return success message
         return {
             statusCode: 201,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 message: 'Post created successfully',
                 post_id: id,
                 notes_path: notesPath
@@ -1613,8 +1668,8 @@ const handleNewPost = async (event, db, user) => {
         console.error('Error creating new post:', error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ 
-                error: 'Failed to create a new post', 
+            body: JSON.stringify({
+                error: 'Failed to create a new post',
                 details: error.message,
                 code: error.code
             })
@@ -1626,10 +1681,10 @@ const handleNewPost = async (event, db, user) => {
 const handleEditPost = async (event, db, user) => {
     const { uploadMarkdownToS3, deleteMarkdownFromS3 } = require('./s3-helper');
     const postId = event.pathParameters.id;
-    
+
     console.log("EditPost handler called for postId:", postId);
     console.log("Event headers:", JSON.stringify(event.headers));
-    
+
     // For OPTIONS requests, return immediately with CORS headers
     if (event.httpMethod === 'OPTIONS') {
         console.log("Handling OPTIONS request for EditPost");
@@ -1639,7 +1694,7 @@ const handleEditPost = async (event, db, user) => {
             body: ''
         };
     }
-    
+
     // Parse the request body
     const parsedBody = JSON.parse(event.body);
     const { title, video_id, video_platform, movement_type, starting_position, ending_position, starting_top_bottom, ending_top_bottom, gi_nogi, practitioner, sequence_start_time, public_status, language, notes } = parsedBody;
@@ -1663,16 +1718,16 @@ const handleEditPost = async (event, db, user) => {
     try {
         // First, get the username for the current user
         const [userResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [user.user_id]);
-        
+
         if (userResult.length === 0) {
             return {
                 statusCode: 404,
                 body: JSON.stringify({ error: 'User profile not found' })
             };
         }
-        
+
         const username = userResult[0].username;
-        
+
         // Check if the post exists and if current user is the owner
         const [postResults] = await db.execute('SELECT owner_id, notes_path FROM posts WHERE id = $1', [postId]);
 
@@ -1695,7 +1750,7 @@ const handleEditPost = async (event, db, user) => {
         // Get the existing notes path, if any
         const existingNotesPath = postResults[0].notes_path;
         let newNotesPath = existingNotesPath;
-        
+
         // If notes are provided and different, upload to S3 and update path
         if (notes !== undefined) {
             try {
@@ -1709,7 +1764,7 @@ const handleEditPost = async (event, db, user) => {
                         // Continue with update even if delete fails
                     }
                 }
-                
+
                 // Upload new markdown file if content is provided
                 if (notes && notes.trim() !== '') {
                     // Use user_id instead of username for storage path stability
@@ -1771,7 +1826,7 @@ const handleEditPost = async (event, db, user) => {
         // Return success message
         return {
             statusCode: 200,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 message: 'Post updated successfully',
                 notes_path: newNotesPath
             })
@@ -1794,16 +1849,16 @@ const handleDeletePost = async (event, db, user) => {
     try {
         // First, get the username for the current user
         const [userResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [user.user_id]);
-        
+
         if (userResult.length === 0) {
             return {
                 statusCode: 404,
                 body: JSON.stringify({ error: 'User profile not found' })
             };
         }
-        
+
         const username = userResult[0].username;
-        
+
         // Check if the post exists and if user is the owner
         const [results] = await db.execute('SELECT owner_id, notes_path FROM posts WHERE id = $1', [postId]);
 
@@ -1825,7 +1880,7 @@ const handleDeletePost = async (event, db, user) => {
 
         // Get the notes path to delete the file from S3 if it exists
         const notesPath = results[0].notes_path;
-        
+
         // If there is a markdown file, try to delete it
         if (notesPath) {
             try {
@@ -1860,7 +1915,7 @@ const handleDeletePost = async (event, db, user) => {
 const handleYouTubeAuthUrl = async (event, db, user) => {
     const { getYouTubeAuthUrl, hasValidYouTubeTokens } = require('./youtube-auth');
     const { generateToken } = require('./auth');
-    
+
     // Check authentication
     if (!user || !user.user_id) {
         return {
@@ -1868,7 +1923,7 @@ const handleYouTubeAuthUrl = async (event, db, user) => {
             body: JSON.stringify({ error: 'User not authenticated' })
         };
     }
-    
+
     try {
         // Ensure database connection
         if (!db) {
@@ -1878,7 +1933,7 @@ const handleYouTubeAuthUrl = async (event, db, user) => {
             try {
                 // Check if user already has valid tokens
                 const hasTokens = await hasValidYouTubeTokens(db, user.user_id);
-                
+
                 if (hasTokens) {
                     return {
                         statusCode: 200,
@@ -1893,19 +1948,19 @@ const handleYouTubeAuthUrl = async (event, db, user) => {
                 // Continue to auth URL generation
             }
         }
-        
+
         try {
             // Generate a short-lived token to include user_id in the state parameter
             // This will be passed back in the callback to identify the user
             const stateToken = generateToken({ userId: user.user_id }, '1h');
-            
+
             // Get the auth URL with state parameter
             const authUrl = getYouTubeAuthUrl(stateToken);
-            
+
             // Return the URL to the client
             return {
                 statusCode: 200,
-                body: JSON.stringify({ 
+                body: JSON.stringify({
                     authUrl,
                     message: 'YouTube authentication URL generated successfully'
                 })
@@ -1929,7 +1984,7 @@ const handleYouTubeAuthUrl = async (event, db, user) => {
 // Handle YouTube token check - returns if the user has valid tokens
 const handleYouTubeTokenCheck = async (event, db, user) => {
     const { hasValidYouTubeTokens, getYouTubeTokens } = require('./youtube-auth');
-    
+
     // Check authentication
     if (!user || !user.user_id) {
         return {
@@ -1937,7 +1992,7 @@ const handleYouTubeTokenCheck = async (event, db, user) => {
             body: JSON.stringify({ error: 'User not authenticated' })
         };
     }
-    
+
     try {
         // Check if the db connection is valid
         if (!db) {
@@ -1950,16 +2005,16 @@ const handleYouTubeTokenCheck = async (event, db, user) => {
                 })
             };
         }
-        
+
         // Wrap everything in try/catch to return graceful errors instead of 500
         try {
             // Check if user has valid tokens
             const hasTokens = await hasValidYouTubeTokens(db, user.user_id);
-            
+
             if (hasTokens) {
                 // Get the token data
                 const tokenData = await getYouTubeTokens(db, user.user_id);
-                
+
                 return {
                     statusCode: 200,
                     body: JSON.stringify({
@@ -1993,7 +2048,7 @@ const handleYouTubeTokenCheck = async (event, db, user) => {
         // Even for outer errors, return 200 with an error message
         return {
             statusCode: 200,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 authenticated: false,
                 error: 'Failed to check YouTube token status'
             })
@@ -2005,13 +2060,13 @@ const handleYouTubeTokenCheck = async (event, db, user) => {
 const handleYouTubeAuthCallback = async (event, db) => {
     const { exchangeCodeForTokens, saveYouTubeTokens } = require('./youtube-auth');
     const { jwtDecode } = require('./auth');
-    
+
     // Extract code from query parameters
     const { code, state } = event.queryStringParameters || {};
-    
+
     console.log("YouTube Auth Callback received with code:", code ? `${code.substring(0, 10)}...` : 'none');
     console.log("Full event query params:", JSON.stringify(event.queryStringParameters));
-    
+
     if (!code) {
         console.error("Missing authorization code in callback");
         return {
@@ -2019,7 +2074,7 @@ const handleYouTubeAuthCallback = async (event, db) => {
             body: JSON.stringify({ error: 'Authorization code is required' })
         };
     }
-    
+
     try {
         console.log("Exchanging code for tokens with YouTube API");
         // Exchange the code for tokens
@@ -2030,7 +2085,7 @@ const handleYouTubeAuthCallback = async (event, db) => {
             expires_in: tokenData.expires_in,
             refresh_token_received: !!tokenData.refresh_token
         });
-        
+
         // If state contains a user token, extract the user ID and save the tokens to database
         let userId = null;
         if (state) {
@@ -2038,7 +2093,7 @@ const handleYouTubeAuthCallback = async (event, db) => {
                 // The state should be the JWT token
                 const decodedToken = jwtDecode(state);
                 userId = decodedToken.userId;
-                
+
                 if (userId && db) {
                     console.log(`Saving YouTube tokens for user ID: ${userId}`);
                     try {
@@ -2061,11 +2116,11 @@ const handleYouTubeAuthCallback = async (event, db) => {
                 // Continue even if state parsing fails - we'll still return the tokens to client
             }
         }
-        
+
         return {
             statusCode: 200,
-            body: JSON.stringify({ 
-                success: true, 
+            body: JSON.stringify({
+                success: true,
                 message: 'YouTube authentication successful',
                 // Only return access token, not the refresh token for security
                 accessToken: tokenData.access_token,
@@ -2079,10 +2134,173 @@ const handleYouTubeAuthCallback = async (event, db) => {
         console.error('Error details:', error.response?.data || error.message);
         return {
             statusCode: 500,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 error: 'YouTube authentication failed',
                 details: error.message,
                 errorData: error.response?.data || null
+            })
+        };
+    }
+};
+
+const handleYouTubeUploadInit = async (event, db, user) => {
+    try {
+        // Parse request body for metadata
+        const requestBody = JSON.parse(event.body);
+        const {
+            title,
+            description,
+            tags = [],
+            privacyStatus = 'unlisted',
+            categoryId = '22',
+            fileSize,
+            mimeType
+        } = requestBody;
+
+        // Validate necessary fields
+        if (!title) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'Title is required' })
+            };
+        }
+
+        if (!fileSize || !mimeType) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'File size and MIME type are required' })
+            };
+        }
+
+        // Get user's YouTube tokens from database
+        const {
+            getYouTubeTokens,
+            hasValidYouTubeTokens
+        } = require('./youtube-auth');
+
+        // Check if user has valid tokens
+        const hasValidTokens = await hasValidYouTubeTokens(db, user.user_id);
+        if (!hasValidTokens) {
+            return {
+                statusCode: 401,
+                body: JSON.stringify({
+                    error: 'No valid YouTube tokens',
+                    message: 'Please authenticate with YouTube first'
+                })
+            };
+        }
+
+        // Get the tokens
+        const tokens = await getYouTubeTokens(db, user.user_id);
+        if (!tokens) {
+            return {
+                statusCode: 500,
+                body: JSON.stringify({ error: 'Failed to retrieve YouTube tokens' })
+            };
+        }
+
+        // Prepare metadata for the YouTube API
+        const videoMetadata = {
+            snippet: {
+                title,
+                description: description || `Uploaded via QuantifyJiuJitsu`,
+                tags: Array.isArray(tags) ? tags : [tags],
+                categoryId
+            },
+            status: {
+                privacyStatus
+            }
+        };
+
+        console.log('Initiating YouTube video upload with metadata:', {
+            title,
+            descriptionLength: description ? description.length : 0,
+            tagCount: Array.isArray(tags) ? tags.length : 1,
+            privacyStatus,
+            categoryId,
+            fileSize,
+            mimeType
+        });
+
+        try {
+            // Initialize a resumable upload with the YouTube API
+            const axios = require('axios');
+
+            // First request to initialize the upload and get the upload URL
+            const initResponse = await axios.post(
+                'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
+                videoMetadata,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${tokens.access_token}`,
+                        'Content-Type': 'application/json',
+                        'X-Upload-Content-Length': fileSize,
+                        'X-Upload-Content-Type': mimeType
+                    }
+                }
+            );
+
+            // Get the location header with the upload URL
+            const uploadUrl = initResponse.headers.location;
+
+            if (!uploadUrl) {
+                return {
+                    statusCode: 500,
+                    body: JSON.stringify({ error: 'Failed to get upload URL from YouTube' })
+                };
+            }
+
+            console.log('Successfully initialized YouTube upload, received upload URL');
+            console.log('Headers received from YouTube:', JSON.stringify(initResponse.headers));
+            console.log('Upload URL:', uploadUrl);
+
+            // Return the upload URL to the client to complete the upload directly
+            return {
+                statusCode: 200,
+                body: JSON.stringify({
+                    message: 'Upload initialized successfully',
+                    uploadUrl,
+                    debug: {
+                        requestId: Math.random().toString(36).substring(2, 12),
+                        timestamp: new Date().toISOString()
+                    }
+                })
+            };
+
+        } catch (youtubeError) {
+            console.error('Error initializing YouTube upload:', youtubeError);
+
+            // If we get an auth error, we should mark the token as expired
+            if (youtubeError.response && (youtubeError.response.status === 401 || youtubeError.response.status === 403)) {
+                console.log('Authentication error with YouTube API, marking token as expired');
+
+                // In a production environment, we would refresh the token here
+                // For now, we'll just return an error
+                return {
+                    statusCode: 401,
+                    body: JSON.stringify({
+                        error: 'YouTube authentication error',
+                        message: 'Your YouTube authorization has expired. Please reconnect your account.'
+                    })
+                };
+            }
+
+            return {
+                statusCode: 500,
+                body: JSON.stringify({
+                    error: 'YouTube API error',
+                    message: youtubeError.response?.data?.error?.message || youtubeError.message
+                })
+            };
+        }
+
+    } catch (error) {
+        console.error('Error handling YouTube upload initialization:', error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({
+                error: 'Server error processing YouTube upload',
+                message: error.message
             })
         };
     }
@@ -2108,4 +2326,5 @@ module.exports = {
     handleYouTubeAuthUrl,
     handleYouTubeAuthCallback,
     handleYouTubeTokenCheck,
+    handleYouTubeUploadInit,
 };

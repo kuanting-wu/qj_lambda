@@ -108,9 +108,6 @@ const saveYouTubeTokens = async (db, userId, tokens) => {
         const expiresAt = tokens.expires_in 
             ? new Date(Date.now() + (tokens.expires_in * 1000)).toISOString()
             : null;
-            
-        // Make sure the table exists - this avoids the need to run migration separately
-        await ensureYoutubeTokensTable(db);
         
         try {
             // Check if user already has tokens

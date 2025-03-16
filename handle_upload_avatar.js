@@ -1,4 +1,4 @@
-const { uploadAvatar, getPresignedUploadUrl, deleteAvatar } = require('../s3-avatar-helper');
+const { uploadAvatar, getPresignedUploadUrl, deleteAvatar } = require('./s3-avatar-helper');
 
 /**
  * Helper function to add CORS headers to responses
@@ -143,7 +143,7 @@ const handleDirectUpload = async (requestBody, db, user, event) => {
         );
         
         // Generate new tokens that include the avatar URL
-        const { generateAccessToken, generateRefreshToken } = require('../auth');
+        const { generateAccessToken, generateRefreshToken } = require('./auth');
         
         // Generate new tokens with the updated avatar URL
         const accessToken = generateAccessToken({ 
@@ -265,7 +265,7 @@ const handleDeleteAvatar = async (requestBody, db, user, event) => {
         );
         
         // Generate new tokens that include the default avatar URL
-        const { generateAccessToken, generateRefreshToken } = require('../auth');
+        const { generateAccessToken, generateRefreshToken } = require('./auth');
         
         // Generate new tokens with the updated avatar URL
         const accessToken = generateAccessToken({ 
