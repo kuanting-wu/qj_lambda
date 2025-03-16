@@ -24,6 +24,7 @@ const {
 const handleSearch = require('./updates/handle_search');
 const handleEditProfile = require('./updates/handle_edit_profile');
 const handleUploadAvatar = require('./updates/handle_upload_avatar');
+const handleYouTubeUploadInit = require('./updates/handle_youtube_upload');
 
 const {
   createGamePlan,
@@ -203,6 +204,8 @@ exports.handler = async (event) => {
             handlerPromise = handleYouTubeAuthUrl(event, db, user);
           } else if (httpMethod === 'GET' && path === '/youtube/token-check') {
             handlerPromise = handleYouTubeTokenCheck(event, db, user);
+          } else if (httpMethod === 'POST' && path === '/youtube/upload/init') {
+            handlerPromise = handleYouTubeUploadInit(event, db, user);
           } else if (httpMethod === 'GET' && path === '/auth/youtube/callback') {
             handlerPromise = handleYouTubeAuthCallback(event, db, user);
           }
