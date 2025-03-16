@@ -2165,12 +2165,8 @@ const handleYouTubeUploadInit = async (event, db, user) => {
             };
         }
 
-        if (!fileSize || !mimeType) {
-            return {
-                statusCode: 400,
-                body: JSON.stringify({ error: 'File size and MIME type are required' })
-            };
-        }
+        // Removed mandatory fileSize and mimeType validation
+        // as we're now only requiring title, description, and privacyStatus
 
         // Get user's YouTube tokens from database
         const {
@@ -2204,7 +2200,7 @@ const handleYouTubeUploadInit = async (event, db, user) => {
             snippet: {
                 title,
                 description: description || `Uploaded via QuantifyJiuJitsu`,
-                tags: Array.isArray(tags) ? tags : [tags],
+                tags: Array.isArray(tags) ? tags : (tags ? [tags] : []),
                 categoryId
             },
             status: {
@@ -2234,8 +2230,9 @@ const handleYouTubeUploadInit = async (event, db, user) => {
                     headers: {
                         'Authorization': `Bearer ${tokens.access_token}`,
                         'Content-Type': 'application/json',
-                        'X-Upload-Content-Length': fileSize,
-                        'X-Upload-Content-Type': mimeType
+                        // Only include content length and type headers if they're provided
+                        ...(fileSize ? { 'X-Upload-Content-Length': fileSize } : {}),
+                        ...(mimeType ? { 'X-Upload-Content-Type': mimeType } : {})
                     }
                 }
             );
