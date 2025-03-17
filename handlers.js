@@ -1695,7 +1695,6 @@ const handleEditPost = async (event, db, user) => {
         };
     }
 
-    let user;
     try {
         user = await authenticateToken(event);
         console.log(`Authenticated user: ${user.user_id}`);
