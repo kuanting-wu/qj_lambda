@@ -167,135 +167,6 @@ const saveYouTubeTokens = async (db, userId, tokens) => {
 };
 
 /**
- * Ensure the YouTube tokens table exists
- * @param {Object} db - The database connection
- */
-const ensureYoutubeTokensTable = async (db) => {
-    try {
-        // Check if the table exists
-        const tableCheck = await db.query(`
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = 'youtube_tokens'
-            )
-        `);
-        
-        const tableExists = tableCheck.rows[0].exists;
-        
-        if (!tableExists) {
-            console.log('YouTube tokens table does not exist, creating it...');
-            
-            // Create the table
-            await db.query(`
-                CREATE TABLE IF NOT EXISTS youtube_tokens (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    access_token TEXT NOT NULL,
-                    refresh_token TEXT,
-                    token_type VARCHAR(20),
-                    expires_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE(user_id)
-                );
-
-                -- Create an index on user_id for faster lookups
-                CREATE INDEX IF NOT EXISTS idx_youtube_tokens_user_id ON youtube_tokens(user_id);
-            `);
-            
-            // Create the updated_at trigger function if it doesn't exist
-            const triggerFunctionCheck = await db.query(`
-                SELECT EXISTS (
-                    SELECT FROM pg_proc
-                    WHERE proname = 'update_youtube_tokens_updated_at'
-                )
-            `);
-            
-            const triggerFunctionExists = triggerFunctionCheck.rows[0].exists;
-            
-            if (!triggerFunctionExists) {
-                await db.query(`
-                    CREATE OR REPLACE FUNCTION update_youtube_tokens_updated_at()
-                    RETURNS TRIGGER AS $$
-                    BEGIN
-                        NEW.updated_at = NOW();
-                        RETURN NEW;
-                    END;
-                    $$ LANGUAGE plpgsql;
-                    
-                    -- Create a trigger to automatically update 'updated_at' on record update
-                    DROP TRIGGER IF EXISTS update_youtube_tokens_updated_at ON youtube_tokens;
-                    CREATE TRIGGER update_youtube_tokens_updated_at
-                    BEFORE UPDATE ON youtube_tokens
-                    FOR EACH ROW
-                    EXECUTE FUNCTION update_youtube_tokens_updated_at();
-                `);
-            }
-            
-            console.log('YouTube tokens table created successfully');
-        }
-    } catch (error) {
-        console.error('Error ensuring YouTube tokens table:', error);
-        throw error;
-    }
-};
-
-/**
- * Refresh a YouTube access token using a refresh token
- * @param {string} refreshToken - The refresh token
- * @returns {Promise<Object>} - The refreshed token data
- */
-const refreshYouTubeToken = async (refreshToken) => {
-    try {
-        console.log('Refreshing YouTube token with refresh token');
-        
-        if (!refreshToken) {
-            throw new Error('Refresh token is required');
-        }
-        
-        // This is important - Google requires form data for token refresh, not JSON
-        const params = new URLSearchParams();
-        params.append('client_id', YOUTUBE_CLIENT_ID);
-        params.append('client_secret', YOUTUBE_CLIENT_SECRET);
-        params.append('refresh_token', refreshToken);
-        params.append('grant_type', 'refresh_token');
-        
-        console.log('Sending token refresh request to Google');
-        
-        const response = await axios.post(
-            'https://oauth2.googleapis.com/token',
-            params,
-            {
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                }
-            }
-        );
-        
-        console.log('Token refresh successful, received new access token with expiry:', {
-            access_token_received: !!response.data.access_token,
-            token_type: response.data.token_type,
-            expires_in: response.data.expires_in
-        });
-        
-        // Ensure we preserve the refresh token, as Google doesn't always return it
-        const tokens = {
-            ...response.data,
-            refresh_token: refreshToken
-        };
-        
-        return tokens;
-    } catch (error) {
-        console.error('Error refreshing YouTube token:', error);
-        if (error.response) {
-            console.error('Response error data:', error.response.data);
-            console.error('Response error status:', error.response.status);
-        }
-        throw error;
-    }
-};
-
-/**
  * Get YouTube OAuth tokens for a user
  * @param {Object} db - The database connection
  * @param {number} userId - The user ID
@@ -342,38 +213,13 @@ const getYouTubeTokens = async (db, userId) => {
             if (tokenData.expires_at && new Date(tokenData.expires_at) < new Date()) {
                 console.log('Token is expired, needs refresh');
                 
-                // Implement token refresh logic
-                try {
-                    if (!tokenData.refresh_token) {
-                        console.error('No refresh token available, cannot refresh access token');
-                        tokenData.is_expired = true;
-                        return tokenData;
-                    }
-                    
-                    // Refresh the token
-                    const refreshedTokens = await refreshYouTubeToken(tokenData.refresh_token);
-                    
-                    // Save the refreshed tokens back to the database
-                    await saveYouTubeTokens(db, userId, refreshedTokens);
-                    
-                    // Get the updated tokens
-                    const updatedResult = await db.query(
-                        'SELECT * FROM youtube_tokens WHERE user_id = $1',
-                        [userId]
-                    );
-                    
-                    if (updatedResult.rows.length === 0) {
-                        console.error('Failed to retrieve updated tokens after refresh');
-                        return null;
-                    }
-                    
-                    console.log('Successfully refreshed and updated YouTube tokens');
-                    return updatedResult.rows[0];
-                } catch (refreshError) {
-                    console.error('Error refreshing YouTube token:', refreshError);
-                    tokenData.is_expired = true;
-                    return tokenData;
-                }
+                // You would implement token refresh logic here using refresh_token
+                // const refreshedTokens = await refreshYouTubeToken(tokenData.refresh_token);
+                // await saveYouTubeTokens(db, userId, refreshedTokens);
+                // return refreshedTokens;
+                
+                // For now, just return the expired token
+                tokenData.is_expired = true;
             }
             
             return tokenData;
@@ -415,6 +261,5 @@ module.exports = {
     exchangeCodeForTokens,
     saveYouTubeTokens,
     getYouTubeTokens,
-    hasValidYouTubeTokens,
-    refreshYouTubeToken
+    hasValidYouTubeTokens
 };

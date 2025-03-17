@@ -23,9 +23,7 @@ const {
   handleYouTubeUploadInit,
 } = require('./handlers');
 
-
 const handleUploadAvatar = require('./handle_upload_avatar');
-
 
 const {
   createGamePlan,
@@ -49,7 +47,7 @@ const withTimeout = (promise, timeoutMs = 15000, errorMessage = 'Operation timed
       reject(new Error(errorMessage));
     }, timeoutMs);
   });
-  
+
   return Promise.race([
     promise,
     timeoutPromise
@@ -59,61 +57,22 @@ const withTimeout = (promise, timeoutMs = 15000, errorMessage = 'Operation timed
 };
 
 // Utility function to add CORS headers to all responses
-const addCorsHeaders = (response, event) => {
-  // Get the origin from the request headers
-  const origin = event.headers?.origin || event.headers?.Origin || 'http://localhost:8080';
+const addCorsHeaders = (response) => response;  // API Gateway will handle CORS
 
-  // List of allowed origins to match API Gateway config
-  const allowedOrigins = [
-    'http://localhost:8080',
-    'http://localhost:8081',
-    'http://localhost:3000',
-    'https://quantifyjiujitsu.com',
-    'https://www.quantifyjiujitsu.com',
-    'https://dev.quantifyjiujitsu.com',
-    'https://staging.quantifyjiujitsu.com',
-    'https://api-dev.quantifyjiujitsu.com',
-    'https://api.quantifyjiujitsu.com',
-    'https://api-staging.quantifyjiujitsu.com'
-  ];
-
-  // Set appropriate origin - if the request origin is allowed, use it; otherwise use a default
-  const responseOrigin = allowedOrigins.includes(origin) ? origin : 'https://quantifyjiujitsu.com';
-
-  // Add CORS headers to the response
-  return {
-    ...response,
-    headers: {
-      ...response.headers,
-      "Access-Control-Allow-Origin": responseOrigin,
-      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key, X-Amz-Date, X-Amz-Security-Token, Accept, Origin, Referer, User-Agent",
-      "Access-Control-Allow-Credentials": "true",
-      "Access-Control-Max-Age": "86400"
-    }
-  };
-};
 
 exports.handler = async (event) => {
   try {
     console.log("Lambda invoked with event:", JSON.stringify(event));
-    
-    // Log environment variables for debugging (excluding sensitive ones)
-    console.log("Environment variables:", Object.keys(process.env)
-      .filter(key => !key.includes('KEY') && !key.includes('SECRET') && !key.includes('PASSWORD'))
-      .map(key => `${key}=${process.env[key] ? (key === 'SES_EMAIL_FROM' ? process.env[key] : '[SET]') : '[UNSET]'}`));
-    
     // Get database connection - it's a singleton pattern so this is efficient
     let db;
     try {
       db = await withTimeout(getDBConnection(), 8000, 'Database connection timed out');
-      console.log("Database connection established successfully");
     } catch (dbError) {
       console.error("Database connection error:", dbError);
       return addCorsHeaders({
         statusCode: 500,
-        body: JSON.stringify({ 
-          error: "Database connection failed", 
+        body: JSON.stringify({
+          error: "Database connection failed",
           details: dbError.message,
           code: dbError.code || "UNKNOWN"
         })
@@ -124,39 +83,9 @@ exports.handler = async (event) => {
     try {
       // Get handler based on route
       let handlerPromise;
-      
+
       const { httpMethod, path } = event;
 
-      // Handle CORS preflight requests - must return proper CORS headers
-      if (httpMethod === 'OPTIONS') {
-        const origin = event.headers?.origin || event.headers?.Origin || 'http://localhost:8080';
-        const allowedOrigins = [
-          'http://localhost:8080',
-          'http://localhost:8081',
-          'http://localhost:3000',
-          'https://quantifyjiujitsu.com',
-          'https://www.quantifyjiujitsu.com',
-          'https://dev.quantifyjiujitsu.com',
-          'https://staging.quantifyjiujitsu.com',
-          'https://api-dev.quantifyjiujitsu.com',
-          'https://api.quantifyjiujitsu.com',
-          'https://api-staging.quantifyjiujitsu.com'
-        ];
-        const responseOrigin = allowedOrigins.includes(origin) ? origin : 'https://quantifyjiujitsu.com';
-        
-        return {
-          statusCode: 204, // No content is more appropriate for OPTIONS
-          headers: {
-            "Access-Control-Allow-Origin": responseOrigin,
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key, X-Amz-Date, X-Amz-Security-Token, Accept, Origin, Referer, User-Agent",
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Max-Age": "86400"
-          },
-          body: "" // Empty body for OPTIONS response
-        };
-      }
-      
       // Public routes that don't require authentication
       if (httpMethod === 'POST' && path === '/signup') {
         handlerPromise = handleSignup(event, db);
@@ -190,7 +119,7 @@ exports.handler = async (event) => {
         // Routes that require authentication
         try {
           const user = await authenticateToken(event);
-          
+
           if (httpMethod === 'PUT' && path.startsWith('/editprofile/')) {
             handlerPromise = handleEditProfile(event, db, user);
           } else if (httpMethod === 'POST' && path === '/newpost') {
@@ -232,58 +161,38 @@ exports.handler = async (event) => {
           } else if (httpMethod === 'GET' && path === '/positions') {
             handlerPromise = getAllPositions(event, db);
           } else {
-            response = addCorsHeaders({ statusCode: 404, body: JSON.stringify({ error: 'Route not found' }) }, event);
+            throw new Error('Route not found');
           }
         } catch (authError) {
           console.error("Authentication error:", authError);
-          response = addCorsHeaders({ 
-            statusCode: 401, 
-            body: JSON.stringify({ 
-              error: 'Authentication failed', 
-              details: authError.message || 'Access token missing or invalid' 
-            }) 
-          }, event);
+          return {
+            statusCode: 401,
+            body: JSON.stringify({ error: 'Authentication failed', details: authError.message || 'Invalid token' })
+          };
         }
       }
-
-      // If a handler was selected, execute it with timeout protection
       if (handlerPromise) {
-        const timeoutPromise = withTimeout(
-          handlerPromise, 
-          14500, // Just under Lambda's 15s timeout to ensure we have time to add CORS headers
-          `Handler for ${httpMethod} ${path} timed out`
-        );
-        
-        const result = await timeoutPromise;
-        response = addCorsHeaders(result, event);
+        const result = await withTimeout(handlerPromise, 14500, `Handler for ${httpMethod} ${path} timed out`);
+        return result;
       }
+
+      return {
+        statusCode: 404,
+        body: JSON.stringify({ error: 'Route not found' })
+      };
+
     } catch (error) {
       console.error("Error in request processing:", error);
-      response = addCorsHeaders({
+      return {
         statusCode: 500,
-        body: JSON.stringify({ 
-          error: "Internal server error", 
-          message: error.message,
-          stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        })
-      }, event);
+        body: JSON.stringify({ error: 'Internal server error', message: error.message })
+      };
     }
-
-    return response;
   } catch (error) {
     console.error("Critical error in Lambda handler:", error);
     return {
       statusCode: 500,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key"
-      },
-      body: JSON.stringify({ 
-        error: "Critical Lambda handler error", 
-        message: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      })
+      body: JSON.stringify({ error: 'Internal server error', message: error.message })
     };
   }
 };
