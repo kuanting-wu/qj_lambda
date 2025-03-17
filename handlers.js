@@ -1695,149 +1695,152 @@ const handleEditPost = async (event, db, user) => {
         };
     }
 
-    // Parse the request body
-    const parsedBody = JSON.parse(event.body);
-    const { title, video_id, video_platform, movement_type, starting_position, ending_position, starting_top_bottom, ending_top_bottom, gi_nogi, practitioner, sequence_start_time, public_status, language, notes } = parsedBody;
-
-    // Validate required fields
-    if (!title || !video_id || !video_platform || !movement_type || !starting_position || !ending_position || !sequence_start_time || !public_status || !language) {
-        return corsResponse(event, 400, { error: 'Required fields are missing to update the post' });
-    }
-
-    // Validate language is one of the allowed values from the schema
-    const allowedLanguages = ['English', 'Japanese', 'Traditional Chinese'];
-    if (!allowedLanguages.includes(language)) {
-        return corsResponse(event, 400, { error: `Language must be one of: ${allowedLanguages.join(', ')}` });
-    }
-
-    // Validate public_status is one of the allowed values
-    if (!['public', 'private', 'subscribers'].includes(public_status)) {
-        return corsResponse(event, 400, { error: 'Public status must be either "public", "private", or "subscribers"' });
-    }
-
+    let user;
     try {
-        // First, get the username for the current user
-        const [userResult] = await db.execute('SELECT username FROM profiles WHERE user_id = $1', [user.user_id]);
+        user = await authenticateToken(event);
+        console.log(`Authenticated user: ${user.user_id}`);
+    } catch (authError) {
+        console.error('Authentication failed:', authError.message);
+        return corsResponse(401, { error: 'Unauthorized' });
+    }
 
-        if (userResult.length === 0) {
-            return {
-                statusCode: 404,
-                body: JSON.stringify({ error: 'User profile not found' })
-            };
+    const [postResults] = await db.execute('SELECT owner_id FROM posts WHERE id = $1', [postId]);
+    if (postResults.length === 0) {
+        console.log(`Post with id ${postId} not found`);
+        return corsResponse(404, { error: 'Post not found' });
+    }
+
+    const postOwnerId = postResults[0].owner_id;
+    if (user.user_id !== postOwnerId) {
+        console.log(`User ${user.user_id} is not the owner of post ${postId}`);
+        if (event.httpMethod === 'HEAD') {
+            return corsResponse(403, { error: 'User not authorized to edit this post' });
+        } else if (event.httpMethod === 'PUT') {
+            // Block PUT requests if user is not the owner
+            return corsResponse(403, { error: 'User not authorized to update this post' });
         }
+    }
 
-        const username = userResult[0].username;
-
-        // Check if the post exists and if current user is the owner
-        const [postResults] = await db.execute('SELECT owner_id, notes_path FROM posts WHERE id = $1', [postId]);
-
-        if (postResults.length === 0) {
-            return {
-                statusCode: 404,
-                body: JSON.stringify({ error: 'Post not found' })
-            };
-        }
-
-        // Check if the authenticated user is the owner of the post
-        const postOwnerId = postResults[0].owner_id;
-        if (user.user_id !== postOwnerId) {
-            return {
-                statusCode: 403,
-                body: JSON.stringify({ error: 'User not authorized to edit this post' })
-            };
-        }
-
-        // Get the existing notes path, if any
-        const existingNotesPath = postResults[0].notes_path;
-        let newNotesPath = existingNotesPath;
-
-        // If notes are provided and different, upload to S3 and update path
-        if (notes !== undefined) {
-            try {
-                // Delete existing markdown file if it exists
-                if (existingNotesPath) {
-                    try {
-                        await deleteMarkdownFromS3(existingNotesPath);
-                        console.log(`Deleted existing markdown file: ${existingNotesPath}`);
-                    } catch (deleteError) {
-                        console.error('Error deleting existing markdown:', deleteError);
-                        // Continue with update even if delete fails
-                    }
-                }
-
-                // Upload new markdown file if content is provided
-                if (notes && notes.trim() !== '') {
-                    // Use user_id instead of username for storage path stability
-                    newNotesPath = await uploadMarkdownToS3(notes, postId, user.user_id);
-                    console.log(`Uploaded new markdown file: ${newNotesPath}`);
-                } else {
-                    // If notes is empty, set notes_path to null
-                    newNotesPath = null;
-                }
-            } catch (s3Error) {
-                console.error('Error handling markdown file:', s3Error);
-                return {
-                    statusCode: 500,
-                    body: JSON.stringify({ error: 'Failed to update notes file' })
-                };
-            }
-        }
-
-        // Proceed with updating the post
-        const updateQuery = `
-        UPDATE posts
-        SET
-          title = $1,
-          video_id = $2,
-          video_platform = $3,
-          movement_type = $4,
-          starting_position = $5,
-          ending_position = $6,
-          starting_top_bottom = $7,
-          ending_top_bottom = $8,
-          gi_nogi = $9,
-          practitioner = $10,
-          sequence_start_time = $11,
-          public_status = $12,
-          language = $13,
-          notes_path = $14
-        WHERE id = $15 AND owner_id = $16
-      `;
-
-        await db.execute(updateQuery, [
-            title,
-            video_id,
-            video_platform,
-            movement_type,
-            starting_position,
-            ending_position,
-            starting_top_bottom,
-            ending_top_bottom,
-            gi_nogi,
-            practitioner,
-            sequence_start_time,
-            public_status,
-            language,
-            newNotesPath,
-            postId,
-            user.user_id
-        ]);
-
-        // Return success message
+    if (event.httpMethod === 'HEAD') {
         return {
             statusCode: 200,
-            body: JSON.stringify({
-                message: 'Post updated successfully',
-                notes_path: newNotesPath
-            })
+            headers: corsHeaders,
         };
+    }
 
-    } catch (error) {
-        console.error('Error updating post:', error);
-        return {
-            statusCode: 500,
-            body: JSON.stringify({ error: 'Failed to update the post', details: error.message })
-        };
+    if (event.httpMethod === 'PUT') {
+        const parsedBody = JSON.parse(event.body);
+        const { title, video_id, video_platform, movement_type, starting_position, ending_position, starting_top_bottom, ending_top_bottom, gi_nogi, practitioner, sequence_start_time, public_status, language, notes } = parsedBody;
+
+        // Validate required fields
+        if (!title || !video_id || !video_platform || !movement_type || !starting_position || !ending_position || !sequence_start_time || !public_status || !language) {
+            return corsResponse(event, 400, { error: 'Required fields are missing to update the post' });
+        }
+
+        // Validate language is one of the allowed values from the schema
+        const allowedLanguages = ['English', 'Japanese', 'Traditional Chinese'];
+        if (!allowedLanguages.includes(language)) {
+            return corsResponse(event, 400, { error: `Language must be one of: ${allowedLanguages.join(', ')}` });
+        }
+
+        // Validate public_status is one of the allowed values
+        if (!['public', 'private', 'subscribers'].includes(public_status)) {
+            return corsResponse(event, 400, { error: 'Public status must be either "public", "private", or "subscribers"' });
+        }
+
+        try {
+            // Get the existing notes path, if any
+            const existingNotesPath = postResults[0].notes_path;
+            let newNotesPath = existingNotesPath;
+
+            // If notes are provided and different, upload to S3 and update path
+            if (notes !== undefined) {
+                try {
+                    // Delete existing markdown file if it exists
+                    if (existingNotesPath) {
+                        try {
+                            await deleteMarkdownFromS3(existingNotesPath);
+                            console.log(`Deleted existing markdown file: ${existingNotesPath}`);
+                        } catch (deleteError) {
+                            console.error('Error deleting existing markdown:', deleteError);
+                            // Continue with update even if delete fails
+                        }
+                    }
+
+                    // Upload new markdown file if content is provided
+                    if (notes && notes.trim() !== '') {
+                        // Use user_id instead of username for storage path stability
+                        newNotesPath = await uploadMarkdownToS3(notes, postId, user.user_id);
+                        console.log(`Uploaded new markdown file: ${newNotesPath}`);
+                    } else {
+                        // If notes is empty, set notes_path to null
+                        newNotesPath = null;
+                    }
+                } catch (s3Error) {
+                    console.error('Error handling markdown file:', s3Error);
+                    return {
+                        statusCode: 500,
+                        body: JSON.stringify({ error: 'Failed to update notes file' })
+                    };
+                }
+            }
+
+            // Proceed with updating the post
+            const updateQuery = `
+            UPDATE posts
+            SET
+              title = $1,
+              video_id = $2,
+              video_platform = $3,
+              movement_type = $4,
+              starting_position = $5,
+              ending_position = $6,
+              starting_top_bottom = $7,
+              ending_top_bottom = $8,
+              gi_nogi = $9,
+              practitioner = $10,
+              sequence_start_time = $11,
+              public_status = $12,
+              language = $13,
+              notes_path = $14
+            WHERE id = $15 AND owner_id = $16
+          `;
+
+            await db.execute(updateQuery, [
+                title,
+                video_id,
+                video_platform,
+                movement_type,
+                starting_position,
+                ending_position,
+                starting_top_bottom,
+                ending_top_bottom,
+                gi_nogi,
+                practitioner,
+                sequence_start_time,
+                public_status,
+                language,
+                newNotesPath,
+                postId,
+                user.user_id
+            ]);
+
+            // Return success message
+            return {
+                statusCode: 200,
+                body: JSON.stringify({
+                    message: 'Post updated successfully',
+                    notes_path: newNotesPath
+                })
+            };
+
+        } catch (error) {
+            console.error('Error updating post:', error);
+            return {
+                statusCode: 500,
+                body: JSON.stringify({ error: 'Failed to update the post', details: error.message })
+            };
+        }
     }
 };
 
@@ -2176,7 +2179,7 @@ const handleYouTubeUploadInit = async (event, db, user) => {
 
         // Get the tokens directly - our getYouTubeTokens function now handles refreshing
         const tokens = await getYouTubeTokens(db, user.user_id);
-        
+
         // Check if tokens exist and aren't expired
         if (!tokens) {
             return {
@@ -2187,7 +2190,7 @@ const handleYouTubeUploadInit = async (event, db, user) => {
                 })
             };
         }
-        
+
         // Check if tokens are expired and couldn't be refreshed
         if (tokens.is_expired) {
             return {
@@ -2274,27 +2277,27 @@ const handleYouTubeUploadInit = async (event, db, user) => {
             // If we get an auth error, try to handle it appropriately
             if (youtubeError.response && (youtubeError.response.status === 401 || youtubeError.response.status === 403)) {
                 console.log('Authentication error with YouTube API:', youtubeError.response.status);
-                
+
                 // We've already tried to refresh tokens when getting them earlier, 
                 // but in case the token expired just after that, try again
                 try {
                     const { refreshYouTubeToken, saveYouTubeTokens } = require('./youtube-auth');
-                    
+
                     // Check if we have a refresh token
                     if (tokens.refresh_token) {
                         console.log('Attempting to refresh token after API auth error');
-                        
+
                         // Refresh the token
                         const refreshedTokens = await refreshYouTubeToken(tokens.refresh_token);
-                        
+
                         // Save the refreshed tokens
                         await saveYouTubeTokens(db, user.user_id, refreshedTokens);
-                        
+
                         // Let the user know to try again
                         return {
                             statusCode: 401,
-                            body: JSON.stringify({ 
-                                error: 'Token refreshed, please try again', 
+                            body: JSON.stringify({
+                                error: 'Token refreshed, please try again',
                                 message: 'Your YouTube token has been refreshed. Please try your upload again.'
                             })
                         };
@@ -2302,13 +2305,13 @@ const handleYouTubeUploadInit = async (event, db, user) => {
                 } catch (refreshError) {
                     console.error('Failed to refresh token after API auth error:', refreshError);
                 }
-                
+
                 // If we reach here, we couldn't refresh the token
                 return {
                     statusCode: 401,
-                    body: JSON.stringify({ 
-                        error: 'YouTube authentication error', 
-                        message: 'Your YouTube authorization has expired. Please reconnect your account.' 
+                    body: JSON.stringify({
+                        error: 'YouTube authentication error',
+                        message: 'Your YouTube authorization has expired. Please reconnect your account.'
                     })
                 };
             }

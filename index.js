@@ -56,10 +56,6 @@ const withTimeout = (promise, timeoutMs = 15000, errorMessage = 'Operation timed
   });
 };
 
-// Utility function to add CORS headers to all responses
-const addCorsHeaders = (response) => response;  // API Gateway will handle CORS
-
-
 exports.handler = async (event) => {
   try {
     console.log("Lambda invoked with event:", JSON.stringify(event));
@@ -67,19 +63,14 @@ exports.handler = async (event) => {
     let db;
     try {
       db = await withTimeout(getDBConnection(), 8000, 'Database connection timed out');
-    } catch (dbError) {
-      console.error("Database connection error:", dbError);
-      return addCorsHeaders({
+    } catch (error) {
+      console.error("Database connection error:", error);
+      return {
         statusCode: 500,
-        body: JSON.stringify({
-          error: "Database connection failed",
-          details: dbError.message,
-          code: dbError.code || "UNKNOWN"
-        })
-      }, event);
+        body: JSON.stringify({ error: "Database connection failed", details: error.message })
+      };
     }
 
-    let response;
     try {
       // Get handler based on route
       let handlerPromise;
