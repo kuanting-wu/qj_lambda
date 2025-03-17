@@ -1685,16 +1685,6 @@ const handleEditPost = async (event, db, user) => {
     console.log("EditPost handler called for postId:", postId);
     console.log("Event headers:", JSON.stringify(event.headers));
 
-    // For OPTIONS requests, return immediately with CORS headers
-    if (event.httpMethod === 'OPTIONS') {
-        console.log("Handling OPTIONS request for EditPost");
-        return {
-            statusCode: 204,
-            headers: corsHeaders(event),
-            body: ''
-        };
-    }
-
     let user;
     try {
         user = await authenticateToken(event);

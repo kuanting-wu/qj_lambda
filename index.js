@@ -117,6 +117,8 @@ exports.handler = async (event) => {
             handlerPromise = handleNewPost(event, db, user);
           } else if (httpMethod === 'PUT' && path.startsWith('/editpost/')) {
             handlerPromise = handleEditPost(event, db, user);
+          } else if (httpMethod === 'HEAD' && path.startsWith('/editpost/')) {
+            handlerPromise = handleEditPost(event, db, user);
           } else if (httpMethod === 'DELETE' && path.startsWith('/deletepost/')) {
             handlerPromise = handleDeletePost(event, db, user);
           } else if (httpMethod === 'POST' && path === '/avatar') {
