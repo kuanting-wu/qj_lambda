@@ -4,6 +4,7 @@ const { uuidv7 } = require('uuidv7');
 const { generateAccessToken, generateRefreshToken } = require('./auth');
 const { sendEmail } = require('./email');
 const { verifyGoogleToken } = require('./google-auth');
+const { authenticateToken } = require('./auth');
 
 // Helper function to add CORS headers to all responses
 const corsHeaders = (event) => {
