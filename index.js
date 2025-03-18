@@ -8,7 +8,7 @@ const {
   handleForgotPassword,
   handleResetPassword,
   handleViewPost,
-  handleSearch,
+  handleSearchPosts,
   handleViewProfile,
   handleProxyImage,
   handleRefreshToken,
@@ -133,8 +133,8 @@ exports.handler = async (event) => {
             handlerPromise = handleYouTubeAuthCallback(event, db, user);
           }
           // Game Plan routes
-          else if (httpMethod === 'GET' && path === '/gameplans') {
-            handlerPromise = getGamePlans(event, db);
+          else if (httpMethod === 'GET' && path === '/search-gameplans') {
+            handlerPromise = searchGamePlans(event, db);
           } else if (httpMethod === 'POST' && path === '/gameplans') {
             handlerPromise = createGamePlan(event, db);
           } else if (httpMethod === 'GET' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
