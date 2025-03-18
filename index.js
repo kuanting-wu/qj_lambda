@@ -96,8 +96,8 @@ exports.handler = async (event) => {
         handlerPromise = handleViewPost(event, db);
       } else if (httpMethod === 'GET' && path.startsWith('/viewprofile/')) {
         handlerPromise = handleViewProfile(event, db);
-      } else if (httpMethod === 'GET' && path === '/search') {
-        handlerPromise = handleSearch(event, db);
+      } else if (httpMethod === 'GET' && path === '/search-posts') {
+        handlerPromise = handleSearchPosts(event, db);
       } else if (httpMethod === 'GET' && path === '/proxy-image') {
         handlerPromise = handleProxyImage(event);
       } else if (httpMethod === 'POST' && path === '/refresh-token') {

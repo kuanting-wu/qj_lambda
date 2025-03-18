@@ -750,7 +750,7 @@ const handleViewProfile = async (event, db) => {
     }
 };
 // Handle Search
-const handleSearch = async (event, db) => {
+const handleSearchPosts = async (event, db) => {
     console.log("Search handler called with parameters:", JSON.stringify(event.queryStringParameters));
 
     // Extract query parameters with defaults
@@ -1686,16 +1686,6 @@ const handleEditPost = async (event, db, user) => {
     console.log("EditPost handler called for postId:", postId);
     console.log("Event headers:", JSON.stringify(event.headers));
 
-    // For OPTIONS requests, return immediately with CORS headers
-    if (event.httpMethod === 'OPTIONS') {
-        console.log("Handling OPTIONS request for EditPost");
-        return {
-            statusCode: 204,
-            headers: corsHeaders(event),
-            body: ''
-        };
-    }
-
     try {
         user = await authenticateToken(event);
         console.log(`Authenticated user: ${user.user_id}`);
@@ -2346,7 +2336,7 @@ module.exports = {
     handleResetPassword,
     handleViewPost,
     handleViewProfile,
-    handleSearch,
+    handleSearchPosts,
     handleProxyImage,
     handleRefreshToken,
     handleGoogleSignin,
