@@ -64,9 +64,11 @@ const createGamePlan = async (event, db) => {
 };
 
 /**
- * Get all game plans for the authenticated user
+ * Search game plans with various filter options
  */
-const getGamePlans = async (event, db) => {
+const searchGamePlans = async (event, db) => {
+    console.log("Search game plans handler called with parameters:", JSON.stringify(event.queryStringParameters));
+    
     // Verify authentication
     const { user_id, username } = await getCallerIdentity(event);
     if (!user_id) {
@@ -76,22 +78,102 @@ const getGamePlans = async (event, db) => {
         };
     }
 
+    // Extract query parameters with defaults
+    const {
+        search = '',
+        language = '',
+        sortOption = 'newToOld',
+    } = event.queryStringParameters || {};
+
+    console.log("Extracted parameters:", {
+        search, language, sortOption
+    });
+
+    const sortOrder = sortOption === 'oldToNew' ? 'ASC' : 'DESC';
+
     try {
-        // Get all game plans for this user
-        const [gamePlans] = await db.execute(
-            'SELECT id, name, description, created_at, updated_at FROM game_plans WHERE user_id = $1 ORDER BY created_at DESC',
-            [user_id]
-        );
+        // Build query conditions based on filters
+        const conditions = [];
+        const queryParams = [];
+        let paramCounter = 1;
+
+        // Always filter by the authenticated user
+        conditions.push(`g.user_id = $${paramCounter}`);
+        queryParams.push(user_id);
+        paramCounter++;
+
+        // Handle the search term (search in name and description)
+        if (search && search.trim() !== '') {
+            const searchParam = `%${search.trim()}%`;
+            conditions.push(`(g.name ILIKE $${paramCounter} OR g.description ILIKE $${paramCounter+1})`);
+            queryParams.push(searchParam);
+            queryParams.push(searchParam);
+            paramCounter += 2;
+        }
+
+        // Filter by language if specified
+        if (language) {
+            conditions.push(`g.language = $${paramCounter}`);
+            queryParams.push(language);
+            paramCounter++;
+        }
+
+        // Build the WHERE clause
+        const whereClause = conditions.length > 0
+            ? `WHERE ${conditions.join(' AND ')}`
+            : '';
+
+        // Build the full query with all filters
+        const fullQuery = `
+            SELECT 
+                g.id,
+                g.name,
+                g.description,
+                g.language,
+                g.created_at,
+                g.updated_at,
+                p.username as owner_name,
+                p.belt,
+                p.academy,
+                (SELECT COUNT(*) FROM game_plan_posts gpp WHERE gpp.game_plan_id = g.id) as post_count
+            FROM 
+                game_plans g
+            JOIN 
+                profiles p ON g.user_id = p.user_id
+            ${whereClause}
+            ORDER BY g.created_at ${sortOrder}
+        `;
+
+        console.log("Executing search game plans query:", fullQuery);
+        console.log("With parameters:", queryParams);
+
+        // Execute the query
+        const [results] = await db.execute(fullQuery, queryParams);
+        console.log(`Found ${results.length} game plans`);
 
         return {
             statusCode: 200,
-            body: JSON.stringify({ game_plans: gamePlans })
+            body: JSON.stringify({
+                game_plans: results,
+                count: results.length
+            })
         };
     } catch (error) {
-        console.error("Error fetching game plans:", error);
+        console.error("Error searching game plans:", error);
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            code: error.code,
+            query: error.query
+        });
+        
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: "Failed to fetch game plans", details: error.message })
+            body: JSON.stringify({
+                error: "Failed to search game plans",
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+                code: process.env.NODE_ENV === 'development' ? error.code : undefined
+            })
         };
     }
 };
@@ -650,7 +732,7 @@ const getAllPositions = async (event, db) => {
 
 module.exports = {
     createGamePlan,
-    getGamePlans,
+    searchGamePlans,
     getGamePlanById,
     updateGamePlan,
     deleteGamePlan,

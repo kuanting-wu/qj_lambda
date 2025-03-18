@@ -27,7 +27,7 @@ const handleUploadAvatar = require('./handle_upload_avatar');
 
 const {
   createGamePlan,
-  getGamePlans,
+  searchGamePlans,
   getGamePlanById,
   updateGamePlan,
   deleteGamePlan,
@@ -98,6 +98,8 @@ exports.handler = async (event) => {
         handlerPromise = handleViewProfile(event, db);
       } else if (httpMethod === 'GET' && path === '/search-posts') {
         handlerPromise = handleSearchPosts(event, db);
+      } else if (httpMethod === 'GET' && path === '/search-gameplans') {
+        handlerPromise = searchGamePlans(event, db);
       } else if (httpMethod === 'GET' && path === '/proxy-image') {
         handlerPromise = handleProxyImage(event);
       } else if (httpMethod === 'POST' && path === '/refresh-token') {
@@ -133,9 +135,7 @@ exports.handler = async (event) => {
             handlerPromise = handleYouTubeAuthCallback(event, db, user);
           }
           // Game Plan routes
-          else if (httpMethod === 'GET' && path === '/search-gameplans') {
-            handlerPromise = searchGamePlans(event, db);
-          } else if (httpMethod === 'POST' && path === '/gameplans') {
+          else if (httpMethod === 'POST' && path === '/gameplans') {
             handlerPromise = createGamePlan(event, db);
           } else if (httpMethod === 'GET' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
             handlerPromise = getGamePlanById(event, db);

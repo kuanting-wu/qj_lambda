@@ -1691,30 +1691,33 @@ const handleEditPost = async (event, db, user) => {
         console.log(`Authenticated user: ${user.user_id}`);
     } catch (authError) {
         console.error('Authentication failed:', authError.message);
-        return corsResponse(401, { error: 'Unauthorized' });
+        return {
+            statusCode: 401,
+            body: JSON.stringify({ error: 'Unauthorized' })
+        };
     }
 
-    const [postResults] = await db.execute('SELECT owner_id FROM posts WHERE id = $1', [postId]);
+    const [postResults] = await db.execute('SELECT owner_id, notes_path FROM posts WHERE id = $1', [postId]);
     if (postResults.length === 0) {
         console.log(`Post with id ${postId} not found`);
-        return corsResponse(404, { error: 'Post not found' });
+        return {
+            statusCode: 404,
+            body: JSON.stringify({ error: 'Post not found' })
+        };
     }
 
     const postOwnerId = postResults[0].owner_id;
     if (user.user_id !== postOwnerId) {
         console.log(`User ${user.user_id} is not the owner of post ${postId}`);
-        if (event.httpMethod === 'HEAD') {
-            return corsResponse(403, { error: 'User not authorized to edit this post' });
-        } else if (event.httpMethod === 'PUT') {
-            // Block PUT requests if user is not the owner
-            return corsResponse(403, { error: 'User not authorized to update this post' });
-        }
+        return {
+            statusCode: 403,
+            body: JSON.stringify({ error: 'User not authorized to edit this post' })
+        };
     }
 
     if (event.httpMethod === 'HEAD') {
         return {
-            statusCode: 200,
-            headers: corsHeaders,
+            statusCode: 200
         };
     }
 
@@ -1724,22 +1727,30 @@ const handleEditPost = async (event, db, user) => {
 
         // Validate required fields
         if (!title || !video_id || !video_platform || !movement_type || !starting_position || !ending_position || !sequence_start_time || !public_status || !language) {
-            return corsResponse(event, 400, { error: 'Required fields are missing to update the post' });
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'Required fields are missing to update the post' })
+            };
         }
 
         // Validate language is one of the allowed values from the schema
         const allowedLanguages = ['English', 'Japanese', 'Traditional Chinese'];
         if (!allowedLanguages.includes(language)) {
-            return corsResponse(event, 400, { error: `Language must be one of: ${allowedLanguages.join(', ')}` });
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: `Language must be one of: ${allowedLanguages.join(', ')}` })
+            };
         }
 
         // Validate public_status is one of the allowed values
         if (!['public', 'private', 'subscribers'].includes(public_status)) {
-            return corsResponse(event, 400, { error: 'Public status must be either "public", "private", or "subscribers"' });
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'Public status must be either "public", "private", or "subscribers"' })
+            };
         }
 
         try {
-            // Get the existing notes path, if any
             const existingNotesPath = postResults[0].notes_path;
             let newNotesPath = existingNotesPath;
 
@@ -1753,17 +1764,14 @@ const handleEditPost = async (event, db, user) => {
                             console.log(`Deleted existing markdown file: ${existingNotesPath}`);
                         } catch (deleteError) {
                             console.error('Error deleting existing markdown:', deleteError);
-                            // Continue with update even if delete fails
                         }
                     }
 
                     // Upload new markdown file if content is provided
                     if (notes && notes.trim() !== '') {
-                        // Use user_id instead of username for storage path stability
                         newNotesPath = await uploadMarkdownToS3(notes, postId, user.user_id);
                         console.log(`Uploaded new markdown file: ${newNotesPath}`);
                     } else {
-                        // If notes is empty, set notes_path to null
                         newNotesPath = null;
                     }
                 } catch (s3Error) {
@@ -1777,24 +1785,24 @@ const handleEditPost = async (event, db, user) => {
 
             // Proceed with updating the post
             const updateQuery = `
-            UPDATE posts
-            SET
-              title = $1,
-              video_id = $2,
-              video_platform = $3,
-              movement_type = $4,
-              starting_position = $5,
-              ending_position = $6,
-              starting_top_bottom = $7,
-              ending_top_bottom = $8,
-              gi_nogi = $9,
-              practitioner = $10,
-              sequence_start_time = $11,
-              public_status = $12,
-              language = $13,
-              notes_path = $14
-            WHERE id = $15 AND owner_id = $16
-          `;
+                UPDATE posts
+                SET
+                    title = $1,
+                    video_id = $2,
+                    video_platform = $3,
+                    movement_type = $4,
+                    starting_position = $5,
+                    ending_position = $6,
+                    starting_top_bottom = $7,
+                    ending_top_bottom = $8,
+                    gi_nogi = $9,
+                    practitioner = $10,
+                    sequence_start_time = $11,
+                    public_status = $12,
+                    language = $13,
+                    notes_path = $14
+                WHERE id = $15 AND owner_id = $16
+            `;
 
             await db.execute(updateQuery, [
                 title,
