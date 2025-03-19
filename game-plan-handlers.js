@@ -114,7 +114,7 @@ const handleSearchGamePlans = async (event, db) => {
         conditions.push(`(
             g.public_status = 'public' OR 
             g.public_status = 'subscribers' OR 
-            (g.public_status = 'private' AND g.user_id = $${paramCounter})
+            (g.public_status = 'private' AND g.owner_id = $${paramCounter})
         )`);
         queryParams.push(ownerUserId);  // Add the ownerUserId here
         paramCounter++;  // Increment after adding the second parameter
