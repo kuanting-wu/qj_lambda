@@ -48,17 +48,6 @@ const handleNewGamePlan = async (event, db, user) => {
 };
 
 const handleSearchGamePlans = async (event, db) => {
-    console.log("Search game plans handler called with parameters:", JSON.stringify(event.queryStringParameters));
-    
-    // Verify authentication
-    const { user_id } = await getCallerIdentity(event);
-    if (!user_id) {
-        return {
-            statusCode: 401,
-            body: JSON.stringify({ error: "Authentication failed", details: "Not authenticated" })
-        };
-    }
-
     // Extract query parameters with defaults
     const {
         search = '',
