@@ -93,7 +93,7 @@ const handleSearchGamePlans = async (event, db) => {
         }
 
         if (ownerUserId) {
-            conditions.push(`g.user_id = $${paramCounter}`);
+            conditions.push(`g.owner_id = $${paramCounter}`);
             queryParams.push(ownerUserId);
             paramCounter++;
         }
@@ -128,7 +128,7 @@ const handleSearchGamePlans = async (event, db) => {
                 p.username as owner_name, p.belt, p.academy, p.avatar_url,
                 (SELECT COUNT(*) FROM game_plan_posts gpp WHERE gpp.game_plan_id = g.id) as post_count
             FROM game_plans g
-            JOIN profiles p ON g.user_id = p.user_id
+            JOIN profiles p ON g.owner_id = p.user_id
             ${whereClause}
             ORDER BY g.created_at ${sortOrder}
         `;
@@ -169,9 +169,9 @@ const handleViewGamePlan = async (event, db) => {
     }
 
     try {
-        // Get the game plan including the public_status field
+        // Get the game plan including the public_status field and owner details
         const [gamePlans] = await db.execute(
-            'SELECT id, name, description, language, public_status, created_at, updated_at FROM game_plans WHERE id = $1',
+            'SELECT id, owner_id, name, description, language, public_status, created_at, updated_at FROM game_plans WHERE id = $1',
             [gamePlanId]
         );
 
@@ -182,7 +182,13 @@ const handleViewGamePlan = async (event, db) => {
             };
         }
 
-        // Get all posts in this game plan
+        // Get owner details from the users table
+        const [owner] = await db.execute(
+            'SELECT id, name FROM users WHERE id = $1',
+            [gamePlans[0].owner_id]
+        );
+
+        // Get all posts associated with this game plan
         const [posts] = await db.execute(`
             SELECT p.id, p.title, p.video_id, p.video_platform, p.owner_name, 
                 p.movement_type, p.starting_position, p.ending_position, 
@@ -217,7 +223,7 @@ const handleViewGamePlan = async (event, db) => {
         return {
             statusCode: 200,
             body: JSON.stringify({ 
-                game_plan: gamePlans[0],
+                game_plan: { ...gamePlans[0], owner },
                 posts,
                 graph: {
                     nodes,
