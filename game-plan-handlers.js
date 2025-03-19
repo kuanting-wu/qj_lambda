@@ -51,7 +51,7 @@ const handleSearchGamePlans = async (event, db) => {
     console.log("Search game plans handler called with parameters:", JSON.stringify(event.queryStringParameters));
     
     // Verify authentication
-    const { user_id, username } = await getCallerIdentity(event);
+    const { user_id } = await getCallerIdentity(event);
     if (!user_id) {
         return {
             statusCode: 401,
@@ -62,34 +62,63 @@ const handleSearchGamePlans = async (event, db) => {
     // Extract query parameters with defaults
     const {
         search = '',
+        createdBy = '',
+        publicStatus = '',
         language = '',
         sortOption = 'newToOld',
     } = event.queryStringParameters || {};
 
-    console.log("Extracted parameters:", {
-        search, language, sortOption
-    });
+    console.log("Extracted parameters:", { search, createdBy, publicStatus, language, sortOption });
 
     const sortOrder = sortOption === 'oldToNew' ? 'ASC' : 'DESC';
 
     try {
+        let ownerUserId = null;
+
+        // If createdBy (username) parameter is provided, find the corresponding user_id first
+        if (createdBy) {
+            const [userResult] = await db.execute(
+                'SELECT user_id FROM profiles WHERE username = $1',
+                [createdBy]
+            );
+
+            if (userResult.length > 0) {
+                ownerUserId = userResult[0].user_id;
+                console.log(`Found user_id ${ownerUserId} for username "${createdBy}"`);
+            } else {
+                console.log(`No user found with username "${createdBy}"`);
+                return {
+                    statusCode: 200,
+                    body: JSON.stringify({ game_plans: [], count: 0 })
+                };
+            }
+        }
+
         // Build query conditions based on filters
         const conditions = [];
         const queryParams = [];
         let paramCounter = 1;
 
-        // Always filter by the authenticated user
-        conditions.push(`g.user_id = $${paramCounter}`);
-        queryParams.push(user_id);
-        paramCounter++;
-
-        // Handle the search term (search in name and description)
+        // Handle full-text search in game plan name and description
         if (search && search.trim() !== '') {
             const searchParam = `%${search.trim()}%`;
-            conditions.push(`(g.name ILIKE $${paramCounter} OR g.description ILIKE $${paramCounter+1})`);
-            queryParams.push(searchParam);
-            queryParams.push(searchParam);
+            conditions.push(`(g.name ILIKE $${paramCounter} OR g.description ILIKE $${paramCounter + 1})`);
+            queryParams.push(searchParam, searchParam);
             paramCounter += 2;
+        }
+
+        // Filter by owner if specified
+        if (ownerUserId) {
+            conditions.push(`g.user_id = $${paramCounter}`);
+            queryParams.push(ownerUserId);
+            paramCounter++;
+        }
+
+        // Filter by public status if specified
+        if (publicStatus) {
+            conditions.push(`g.public_status = $${paramCounter}`);
+            queryParams.push(publicStatus);
+            paramCounter++;
         }
 
         // Filter by language if specified
@@ -99,28 +128,27 @@ const handleSearchGamePlans = async (event, db) => {
             paramCounter++;
         }
 
+        // Add privacy conditions (users can only see their own private game plans)
+        conditions.push(`(
+            g.public_status = 'public' OR 
+            g.public_status = 'subscribers' OR 
+            (g.public_status = 'private' AND g.user_id = $${paramCounter})
+        )`);
+        queryParams.push(user_id);
+        paramCounter++;
+
         // Build the WHERE clause
-        const whereClause = conditions.length > 0
-            ? `WHERE ${conditions.join(' AND ')}`
-            : '';
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
         // Build the full query with all filters
         const fullQuery = `
             SELECT 
-                g.id,
-                g.name,
-                g.description,
-                g.language,
-                g.created_at,
-                g.updated_at,
-                p.username as owner_name,
-                p.belt,
-                p.academy,
+                g.id, g.name, g.description, g.language, g.public_status,
+                g.created_at, g.updated_at,
+                p.username as owner_name, p.belt, p.academy,
                 (SELECT COUNT(*) FROM game_plan_posts gpp WHERE gpp.game_plan_id = g.id) as post_count
-            FROM 
-                game_plans g
-            JOIN 
-                profiles p ON g.user_id = p.user_id
+            FROM game_plans g
+            JOIN profiles p ON g.user_id = p.user_id
             ${whereClause}
             ORDER BY g.created_at ${sortOrder}
         `;
@@ -141,19 +169,11 @@ const handleSearchGamePlans = async (event, db) => {
         };
     } catch (error) {
         console.error("Error searching game plans:", error);
-        console.error('Error details:', {
-            message: error.message,
-            stack: error.stack,
-            code: error.code,
-            query: error.query
-        });
-        
         return {
             statusCode: 500,
             body: JSON.stringify({
                 error: "Failed to search game plans",
-                details: process.env.NODE_ENV === 'development' ? error.message : undefined,
-                code: process.env.NODE_ENV === 'development' ? error.code : undefined
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
             })
         };
     }
