@@ -1,24 +1,48 @@
 const { generateAccessToken, generateRefreshToken } = require('./auth');
 
 const handleViewProfile = async (event, db) => {
+    console.log("View profile handler called with parameters:", JSON.stringify(event.pathParameters));
     const { username } = event.pathParameters; // Extract username from URL path
 
     if (!username) {
+        console.log("Error: Username parameter is missing");
         return { statusCode: 400, body: JSON.stringify({ error: 'Username is required' }) };
     }
 
+    console.log(`Attempting to fetch profile for username: ${username}`);
+    
     try {
         // Query the profiles table for the specified username
-        const [results] = await db.execute('SELECT * FROM profiles WHERE username = $1', [username]);
+        const query = 'SELECT * FROM profiles WHERE username = $1';
+        console.log(`Executing query: ${query} with params: [${username}]`);
+        
+        const [results] = await db.execute(query, [username]);
+        console.log(`Query executed successfully. Found ${results ? results.length : 0} results`);
 
-        if (results.length === 0) {
+        if (!results || results.length === 0) {
+            console.log(`No profile found for username: ${username}`);
             return { statusCode: 404, body: JSON.stringify({ error: 'Profile not found' }) };
         }
 
+        // Don't log the entire profile data as it might contain sensitive information
+        console.log(`Profile found for ${username}, returning data`);
         return { statusCode: 200, body: JSON.stringify(results[0]) };
     } catch (error) {
         console.error('Error retrieving profile:', error);
-        return { statusCode: 500, body: JSON.stringify({ error: 'Server error' }) };
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            code: error.code,
+            query: error.query
+        });
+        
+        return { 
+            statusCode: 500, 
+            body: JSON.stringify({ 
+                error: 'Server error',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined 
+            }) 
+        };
     }
 };
 
