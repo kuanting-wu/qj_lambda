@@ -120,6 +120,8 @@ exports.handler = async (event) => {
       // Game Plan routes
       else if (httpMethod === 'GET' && path === '/search-gameplans') {
         handlerPromise = handleSearchGamePlans(event, db);
+      } else if (httpMethod === 'GET' && path.startsWith('/view-gameplan/')) {
+        handlerPromise = handleViewGamePlan(event, db);
       }
       // Proxy Image
       else if (httpMethod === 'GET' && path === '/proxy-image') {
@@ -152,7 +154,7 @@ exports.handler = async (event) => {
             handlerPromise = handleDeletePost(event, db, user);
           }
           // Avatar
-           else if (httpMethod === 'POST' && path === '/avatar') {
+          else if (httpMethod === 'POST' && path === '/avatar') {
             handlerPromise = handleUploadAvatar(event, db, user);
           }
           // Youtube OAuth
@@ -165,10 +167,7 @@ exports.handler = async (event) => {
           } else if (httpMethod === 'GET' && path === '/auth/youtube/callback') {
             handlerPromise = handleYouTubeAuthCallback(event, db, user);
           }
-
-          else if (httpMethod === 'GET' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
-            handlerPromise = handleViewGamePlan(event, db);
-          } else if (httpMethod === 'PUT' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
+          else if (httpMethod === 'PUT' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
             handlerPromise = updateGamePlan(event, db);
           } else if (httpMethod === 'DELETE' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
             handlerPromise = deleteGamePlan(event, db);
