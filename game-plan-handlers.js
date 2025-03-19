@@ -697,7 +697,7 @@ const getAllPositions = async (event, db) => {
 module.exports = {
     handleNewGamePlan,
     handleSearchGamePlans,
-    getGamePlanById,
+    handleViewGamePlan,
     updateGamePlan,
     deleteGamePlan,
     addPostToGamePlan,

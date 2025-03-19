@@ -42,14 +42,14 @@ const { handleUploadAvatar
 const {
   handleNewGamePlan,
   handleSearchGamePlans,
-  handleGetGamePlanById,
+  handleViewGamePlan,
   handleUpdateGamePlan,
   handleDeleteGamePlan,
   handleAddPostToGamePlan,
   handleRemovePostFromGamePlan,
   handleGetPostsByPosition,
   handleGetPostsByTransition,
-  handleGetAllPositions
+  handleGetAllPositions,
 } = require('./game-plan-handlers');
 
 // Set a timeout function to guard against hanging operations
@@ -167,7 +167,7 @@ exports.handler = async (event) => {
           }
 
           else if (httpMethod === 'GET' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
-            handlerPromise = getGamePlanById(event, db);
+            handlerPromise = handleViewGamePlan(event, db);
           } else if (httpMethod === 'PUT' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
             handlerPromise = updateGamePlan(event, db);
           } else if (httpMethod === 'DELETE' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
