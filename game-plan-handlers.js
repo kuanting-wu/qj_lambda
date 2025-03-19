@@ -125,7 +125,7 @@ const handleSearchGamePlans = async (event, db) => {
             SELECT 
                 g.id, g.name, g.description, g.language, g.public_status,
                 g.created_at, g.updated_at,
-                p.username as owner_name, p.belt, p.academy, p.avatar_url
+                p.username as owner_name, p.belt, p.academy, p.avatar_url,
                 (SELECT COUNT(*) FROM game_plan_posts gpp WHERE gpp.game_plan_id = g.id) as post_count
             FROM game_plans g
             JOIN profiles p ON g.user_id = p.user_id
@@ -171,14 +171,14 @@ const handleViewGamePlan = async (event, db) => {
     try {
         // Get the game plan including the public_status field
         const [gamePlans] = await db.execute(
-            'SELECT id, name, description, language, public_status, created_at, updated_at FROM game_plans WHERE id = $1 AND user_id = $2',
-            [gamePlanId, ]
+            'SELECT id, name, description, language, public_status, created_at, updated_at FROM game_plans WHERE id = $1',
+            [gamePlanId]
         );
 
         if (gamePlans.length === 0) {
             return {
                 statusCode: 404,
-                body: JSON.stringify({ error: "Game plan not found or access denied" })
+                body: JSON.stringify({ error: "Game plan not found" })
             };
         }
 
@@ -244,14 +244,6 @@ const updateGamePlan = async (event, db) => {
         };
     }
 
-    // Verify authentication
-    const { user_id, username } = await getCallerIdentity(event);
-    if (!user_id) {
-        return {
-            statusCode: 401,
-            body: JSON.stringify({ error: "Authentication failed", details: "Not authenticated" })
-        };
-    }
 
     // Parse request body
     let requestBody;
@@ -327,14 +319,7 @@ const deleteGamePlan = async (event, db) => {
         };
     }
 
-    // Verify authentication
-    const { user_id, username } = await getCallerIdentity(event);
-    if (!user_id) {
-        return {
-            statusCode: 401,
-            body: JSON.stringify({ error: "Authentication failed", details: "Not authenticated" })
-        };
-    }
+
 
     try {
         // Check if the game plan exists and belongs to the user
@@ -390,14 +375,6 @@ const addPostToGamePlan = async (event, db) => {
         };
     }
 
-    // Verify authentication
-    const { user_id, username } = await getCallerIdentity(event);
-    if (!user_id) {
-        return {
-            statusCode: 401,
-            body: JSON.stringify({ error: "Authentication failed", details: "Not authenticated" })
-        };
-    }
 
     // Parse request body
     let requestBody;
@@ -483,14 +460,6 @@ const removePostFromGamePlan = async (event, db) => {
         };
     }
 
-    // Verify authentication
-    const { user_id, username } = await getCallerIdentity(event);
-    if (!user_id) {
-        return {
-            statusCode: 401,
-            body: JSON.stringify({ error: "Authentication failed", details: "Not authenticated" })
-        };
-    }
 
     try {
         // Check if the game plan exists and belongs to the user
@@ -542,14 +511,6 @@ const getPostsByPosition = async (event, db) => {
         };
     }
 
-    // Verify authentication
-    const { user_id, username } = await getCallerIdentity(event);
-    if (!user_id) {
-        return {
-            statusCode: 401,
-            body: JSON.stringify({ error: "Authentication failed", details: "Not authenticated" })
-        };
-    }
 
     try {
         // Check if the game plan exists and belongs to the user
@@ -604,14 +565,6 @@ const getPostsByTransition = async (event, db) => {
         };
     }
 
-    // Verify authentication
-    const { user_id, username } = await getCallerIdentity(event);
-    if (!user_id) {
-        return {
-            statusCode: 401,
-            body: JSON.stringify({ error: "Authentication failed", details: "Not authenticated" })
-        };
-    }
 
     try {
         // Check if the game plan exists and belongs to the user
