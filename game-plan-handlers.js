@@ -178,9 +178,9 @@ const handleViewGamePlan = async (event, db) => {
     }
 
     try {
-        // Get the game plan
+        // Get the game plan including the public_status field
         const [gamePlans] = await db.execute(
-            'SELECT id, name, description, created_at, updated_at FROM game_plans WHERE id = $1 AND user_id = $2',
+            'SELECT id, name, description, language, public_status, created_at, updated_at FROM game_plans WHERE id = $1 AND user_id = $2',
             [gamePlanId, user_id]
         );
 
@@ -204,7 +204,7 @@ const handleViewGamePlan = async (event, db) => {
             ORDER BY p.created_at DESC
         `, [gamePlanId]);
 
-        // Get all nodes and edges used in this game plan
+        // Get all nodes (positions) used in this game plan
         const [nodes] = await db.execute(`
             SELECT DISTINCT n.position, n.top_bottom, n.id
             FROM nodes n
@@ -214,6 +214,7 @@ const handleViewGamePlan = async (event, db) => {
             ORDER BY n.position
         `, [gamePlanId]);
 
+        // Get all edges (transitions) used in this game plan
         const [edges] = await db.execute(`
             SELECT DISTINCT e.from_position, e.to_position, e.id
             FROM edges e
