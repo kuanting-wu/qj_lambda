@@ -1,19 +1,4 @@
-const { getDBConnection } = require('./db');
-const { getCallerIdentity } = require('./auth');
-
-/**
- * Create a new game plan
- */
-const createGamePlan = async (event, db) => {
-    // Verify authentication
-    const { user_id, username } = await getCallerIdentity(event);
-    if (!user_id) {
-        return {
-            statusCode: 401,
-            body: JSON.stringify({ error: "Authentication failed", details: "Not authenticated" })
-        };
-    }
-
+const handleNewGamePlan = async (event, db, user) => {
     // Parse request body
     let requestBody;
     try {
@@ -27,7 +12,7 @@ const createGamePlan = async (event, db) => {
     }
 
     // Validate required fields
-    const { name, description } = requestBody;
+    const { name, description, language } = requestBody;
     if (!name || name.trim() === '') {
         return {
             statusCode: 400,
@@ -35,26 +20,25 @@ const createGamePlan = async (event, db) => {
         };
     }
 
+    // Ensure language is valid or set a default
+    const allowedLanguages = ['English', 'Japanese', 'Traditional Chinese'];
+    const finalLanguage = allowedLanguages.includes(language) ? language : 'English';
+
     try {
-        await db.beginTransaction();
-
-        // Create the game plan
-        const [gamePlans] = await db.execute(
-            'INSERT INTO game_plans (user_id, name, description) VALUES ($1, $2, $3) RETURNING id, name, description, created_at',
-            [user_id, name, description || null]
+        // Insert the game plan into the database with language
+        const [gamePlanResult] = await db.execute(
+            'INSERT INTO game_plans (user_id, name, description, language) VALUES ($1, $2, $3, $4) RETURNING id, name, description, language, created_at',
+            [user.user_id, name, description || null, finalLanguage] // ✅ Added `language`
         );
-
-        await db.commit();
 
         return {
             statusCode: 201,
             body: JSON.stringify({ 
                 message: "Game plan created successfully", 
-                game_plan: gamePlans[0] 
+                game_plan: gamePlanResult[0] 
             })
         };
     } catch (error) {
-        await db.rollback();
         console.error("Error creating game plan:", error);
         return {
             statusCode: 500,
@@ -63,10 +47,7 @@ const createGamePlan = async (event, db) => {
     }
 };
 
-/**
- * Search game plans with various filter options
- */
-const searchGamePlans = async (event, db) => {
+const handleSearchGamePlans = async (event, db) => {
     console.log("Search game plans handler called with parameters:", JSON.stringify(event.queryStringParameters));
     
     // Verify authentication
@@ -178,9 +159,6 @@ const searchGamePlans = async (event, db) => {
     }
 };
 
-/**
- * Get a specific game plan by ID
- */
 const getGamePlanById = async (event, db) => {
     // Extract game plan ID from the path
     const gamePlanId = event.pathParameters?.id;
@@ -265,9 +243,6 @@ const getGamePlanById = async (event, db) => {
     }
 };
 
-/**
- * Update a game plan
- */
 const updateGamePlan = async (event, db) => {
     // Extract game plan ID from the path
     const gamePlanId = event.pathParameters?.id;
@@ -351,9 +326,6 @@ const updateGamePlan = async (event, db) => {
     }
 };
 
-/**
- * Delete a game plan
- */
 const deleteGamePlan = async (event, db) => {
     // Extract game plan ID from the path
     const gamePlanId = event.pathParameters?.id;
@@ -417,9 +389,6 @@ const deleteGamePlan = async (event, db) => {
     }
 };
 
-/**
- * Add a post to a game plan
- */
 const addPostToGamePlan = async (event, db) => {
     // Extract game plan ID from the path
     const gamePlanId = event.pathParameters?.id;
@@ -511,9 +480,6 @@ const addPostToGamePlan = async (event, db) => {
     }
 };
 
-/**
- * Remove a post from a game plan
- */
 const removePostFromGamePlan = async (event, db) => {
     // Extract game plan ID and post ID from the path
     const gamePlanId = event.pathParameters?.id;
@@ -573,9 +539,6 @@ const removePostFromGamePlan = async (event, db) => {
     }
 };
 
-/**
- * Get all posts for a specific position in a game plan
- */
 const getPostsByPosition = async (event, db) => {
     // Extract game plan ID and position from the path
     const gamePlanId = event.pathParameters?.id;
@@ -637,9 +600,6 @@ const getPostsByPosition = async (event, db) => {
     }
 };
 
-/**
- * Get all posts for a specific transition (edge) in a game plan
- */
 const getPostsByTransition = async (event, db) => {
     // Extract game plan ID, from_position, and to_position from the request
     const gamePlanId = event.pathParameters?.id;
@@ -706,9 +666,6 @@ const getPostsByTransition = async (event, db) => {
     }
 };
 
-/**
- * Get all positions (nodes)
- */
 const getAllPositions = async (event, db) => {
     try {
         // Get all positions (nodes)
@@ -731,8 +688,8 @@ const getAllPositions = async (event, db) => {
 };
 
 module.exports = {
-    createGamePlan,
-    searchGamePlans,
+    handleNewGamePlan,
+    handleSearchGamePlans,
     getGamePlanById,
     updateGamePlan,
     deleteGamePlan,

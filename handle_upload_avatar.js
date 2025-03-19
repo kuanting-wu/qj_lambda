@@ -5,7 +5,7 @@ const { uploadAvatar, getPresignedUploadUrl, deleteAvatar } = require('./s3-avat
  */
 const addCorsHeaders = (response, event) => {
     const origin = event.headers?.origin || event.headers?.Origin || 'http://localhost:8080';
-    
+
     // Define allowed origins
     const allowedOrigins = [
         'http://localhost:8080',
@@ -19,10 +19,10 @@ const addCorsHeaders = (response, event) => {
         'https://api.quantifyjiujitsu.com',
         'https://api-staging.quantifyjiujitsu.com'
     ];
-    
+
     // Use the origin if it's in the allowed list, otherwise use a default
     const responseOrigin = allowedOrigins.includes(origin) ? origin : 'https://quantifyjiujitsu.com';
-    
+
     return {
         ...response,
         headers: {
@@ -49,7 +49,7 @@ const handleUploadAvatar = async (event, db, user) => {
     console.log("Event HTTP method:", event.httpMethod);
     console.log("Event path parameters:", event.pathParameters);
     console.log("Event request context:", event.requestContext?.authorizer);
-    
+
     // Only authenticated users can upload avatars
     if (!user || !user.user_id) {
         return addCorsHeaders({
@@ -57,22 +57,22 @@ const handleUploadAvatar = async (event, db, user) => {
             body: JSON.stringify({ error: 'Authentication required' })
         }, event);
     }
-    
+
     try {
         // Parse the request body for the operation data
         const requestBody = JSON.parse(event.body);
         const operation = requestBody.operation || 'upload';
-        
+
         switch (operation) {
             case 'upload':
                 return await handleDirectUpload(requestBody, db, user, event);
-            
+
             case 'getUrl':
                 return await handleGetPresignedUrl(requestBody, user, event);
-            
+
             case 'delete':
                 return await handleDeleteAvatar(requestBody, db, user, event);
-            
+
             default:
                 return addCorsHeaders({
                     statusCode: 400,
@@ -83,7 +83,7 @@ const handleUploadAvatar = async (event, db, user) => {
         console.error('Error handling avatar operation:', error);
         return addCorsHeaders({
             statusCode: 500,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 error: 'Failed to process avatar request',
                 message: error.message
             })
@@ -96,14 +96,14 @@ const handleUploadAvatar = async (event, db, user) => {
  */
 const handleDirectUpload = async (requestBody, db, user, event) => {
     const { imageData, contentType } = requestBody;
-    
+
     if (!imageData) {
         return addCorsHeaders({
             statusCode: 400,
             body: JSON.stringify({ error: 'Image data is required' })
         }, event);
     }
-    
+
     try {
         // Decode base64 image
         const imageBuffer = Buffer.from(
@@ -111,7 +111,7 @@ const handleDirectUpload = async (requestBody, db, user, event) => {
             imageData.replace(/^data:image\/\w+;base64,/, ''),
             'base64'
         );
-        
+
         // Make sure the image isn't too large (5MB max)
         const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
         if (imageBuffer.length > MAX_SIZE_BYTES) {
@@ -120,46 +120,46 @@ const handleDirectUpload = async (requestBody, db, user, event) => {
                 body: JSON.stringify({ error: 'Image too large. Maximum size is 5MB.' })
             }, event);
         }
-        
+
         // Process and upload the image
         const uploadResult = await uploadAvatar(
-            imageBuffer, 
-            user.user_id, 
+            imageBuffer,
+            user.user_id,
             contentType || 'image/jpeg'
         );
-        
+
         // Get the old avatar URL from the database
         const [profileResults] = await db.execute(
             'SELECT avatar_url FROM profiles WHERE user_id = $1',
             [user.user_id]
         );
-        
+
         const oldAvatarUrl = profileResults.length > 0 ? profileResults[0].avatar_url : null;
-        
+
         // Update the user's profile with the new avatar URL
         await db.execute(
             'UPDATE profiles SET avatar_url = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
             [uploadResult.url, user.user_id]
         );
-        
+
         // Generate new tokens that include the avatar URL
         const { generateAccessToken, generateRefreshToken } = require('./auth');
-        
+
         // Generate new tokens with the updated avatar URL
-        const accessToken = generateAccessToken({ 
+        const accessToken = generateAccessToken({
             user_id: user.user_id,
             username: user.username,
             email: user.email,
             avatar_url: uploadResult.url
         });
-        
+
         const refreshToken = generateRefreshToken({
             user_id: user.user_id,
             username: user.username,
             email: user.email,
             avatar_url: uploadResult.url
         });
-        
+
         return addCorsHeaders({
             statusCode: 200,
             body: JSON.stringify({
@@ -174,7 +174,7 @@ const handleDirectUpload = async (requestBody, db, user, event) => {
         console.error('Error uploading avatar:', error);
         return addCorsHeaders({
             statusCode: 500,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 error: 'Failed to upload avatar',
                 message: error.message
             })
@@ -187,10 +187,10 @@ const handleDirectUpload = async (requestBody, db, user, event) => {
  */
 const handleGetPresignedUrl = async (requestBody, user, event) => {
     const { contentType = 'image/jpeg' } = requestBody;
-    
+
     try {
         const result = await getPresignedUploadUrl(user.user_id, contentType);
-        
+
         return addCorsHeaders({
             statusCode: 200,
             body: JSON.stringify({
@@ -209,7 +209,7 @@ const handleGetPresignedUrl = async (requestBody, user, event) => {
         console.error('Error generating pre-signed URL:', error);
         return addCorsHeaders({
             statusCode: 500,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 error: 'Failed to generate upload URL',
                 message: error.message
             })
@@ -227,16 +227,16 @@ const handleDeleteAvatar = async (requestBody, db, user, event) => {
             'SELECT avatar_url FROM profiles WHERE user_id = $1',
             [user.user_id]
         );
-        
+
         if (profileResults.length === 0) {
             return addCorsHeaders({
                 statusCode: 404,
                 body: JSON.stringify({ error: 'Profile not found' })
             }, event);
         }
-        
+
         const currentAvatarUrl = profileResults[0].avatar_url;
-        
+
         // If there's no avatar to delete
         if (!currentAvatarUrl) {
             return addCorsHeaders({
@@ -244,44 +244,44 @@ const handleDeleteAvatar = async (requestBody, db, user, event) => {
                 body: JSON.stringify({ error: 'No avatar to delete' })
             }, event);
         }
-        
+
         // Extract the key from the URL
         // Example: https://qj-user-avatars.s3.amazonaws.com/avatars/123/abc.webp
         const urlParts = currentAvatarUrl.split('/');
         const key = urlParts.slice(3).join('/'); // Skip the protocol and bucket parts
-        
+
         // Delete the avatar from S3
         if (key) {
             await deleteAvatar(key);
         }
-        
+
         // Set a default avatar URL or null based on your application's needs
         const defaultAvatarUrl = 'https://cdn.builder.io/api/v1/image/assets/TEMP/64c9bda73ca89162bc806ea1e084a3cd2dccf15193fe0e3c0e8008a485352e26?placeholderIfAbsent=true&apiKey=ee54480c62b34c3d9ff7ccdcccbf22d1';
-        
+
         // Update the profile with the default avatar
         await db.execute(
             'UPDATE profiles SET avatar_url = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
             [defaultAvatarUrl, user.user_id]
         );
-        
+
         // Generate new tokens that include the default avatar URL
         const { generateAccessToken, generateRefreshToken } = require('./auth');
-        
+
         // Generate new tokens with the updated avatar URL
-        const accessToken = generateAccessToken({ 
+        const accessToken = generateAccessToken({
             user_id: user.user_id,
             username: user.username,
             email: user.email,
             avatar_url: defaultAvatarUrl
         });
-        
+
         const refreshToken = generateRefreshToken({
             user_id: user.user_id,
             username: user.username,
             email: user.email,
             avatar_url: defaultAvatarUrl
         });
-        
+
         return addCorsHeaders({
             statusCode: 200,
             body: JSON.stringify({
@@ -295,7 +295,7 @@ const handleDeleteAvatar = async (requestBody, db, user, event) => {
         console.error('Error deleting avatar:', error);
         return addCorsHeaders({
             statusCode: 500,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 error: 'Failed to delete avatar',
                 message: error.message
             })
@@ -303,4 +303,6 @@ const handleDeleteAvatar = async (requestBody, db, user, event) => {
     }
 };
 
-module.exports = handleUploadAvatar;
+module.exports = {
+    handleUploadAvatar
+};

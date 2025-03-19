@@ -1,5 +1,23 @@
 const { getDBConnection } = require('./db');
 const { authenticateToken } = require('./auth');
+
+const {
+  handleProxyImage,
+} = require('./image-handlers');
+
+const {
+  handleViewPost,
+  handleSearchPosts,
+  handleNewPost,
+  handleEditPost,
+  handleDeletePost,
+} = require('./post-handlers');
+
+const {
+  handleViewProfile,
+  handleEditProfile,
+} = require('./profiles-handlers');
+
 const {
   handleSignup,
   handleSignin,
@@ -7,35 +25,31 @@ const {
   handleResendVerification,
   handleForgotPassword,
   handleResetPassword,
-  handleViewPost,
-  handleSearchPosts,
-  handleViewProfile,
-  handleProxyImage,
   handleRefreshToken,
   handleGoogleSignin,
-  handleEditProfile,
-  handleNewPost,
-  handleEditPost,
-  handleDeletePost,
+} = require('./auth-handlers');
+
+const {
   handleYouTubeAuthUrl,
   handleYouTubeAuthCallback,
   handleYouTubeTokenCheck,
   handleYouTubeUploadInit,
-} = require('./handlers');
+} = require('./youtube-handlers');
 
-const handleUploadAvatar = require('./handle_upload_avatar');
+const { handleUploadAvatar
+} = require('./handle_upload_avatar');
 
 const {
-  createGamePlan,
-  searchGamePlans,
-  getGamePlanById,
-  updateGamePlan,
-  deleteGamePlan,
-  addPostToGamePlan,
-  removePostFromGamePlan,
-  getPostsByPosition,
-  getPostsByTransition,
-  getAllPositions
+  handleNewGamePlan,
+  handleSearchGamePlans,
+  handleGetGamePlanById,
+  handleUpdateGamePlan,
+  handleDeleteGamePlan,
+  handleAddPostToGamePlan,
+  handleRemovePostFromGamePlan,
+  handleGetPostsByPosition,
+  handleGetPostsByTransition,
+  handleGetAllPositions
 } = require('./game-plan-handlers');
 
 // Set a timeout function to guard against hanging operations
@@ -77,7 +91,7 @@ exports.handler = async (event) => {
 
       const { httpMethod, path } = event;
 
-      // Public routes that don't require authentication
+      // Auth routes
       if (httpMethod === 'POST' && path === '/signup') {
         handlerPromise = handleSignup(event, db);
       } else if (httpMethod === 'POST' && path === '/signin') {
@@ -92,30 +106,43 @@ exports.handler = async (event) => {
         handlerPromise = handleForgotPassword(event, db);
       } else if (httpMethod === 'POST' && path === '/reset-password') {
         handlerPromise = handleResetPassword(event, db);
-      } else if (httpMethod === 'GET' && path.startsWith('/viewpost/')) {
+      } else if (httpMethod === 'POST' && path === '/refresh-token') {
+        handlerPromise = handleRefreshToken(event, db);
+      }
+      // Posts routes
+      else if (httpMethod === 'GET' && path.startsWith('/viewpost/')) {
         handlerPromise = handleViewPost(event, db);
       } else if (httpMethod === 'GET' && path.startsWith('/viewprofile/')) {
         handlerPromise = handleViewProfile(event, db);
       } else if (httpMethod === 'GET' && path === '/search-posts') {
         handlerPromise = handleSearchPosts(event, db);
-      } else if (httpMethod === 'GET' && path === '/search-gameplans') {
-        handlerPromise = searchGamePlans(event, db);
-      } else if (httpMethod === 'GET' && path === '/proxy-image') {
+      }
+      // Game Plan routes
+      else if (httpMethod === 'GET' && path === '/search-gameplans') {
+        handlerPromise = handleSearchGamePlans(event, db);
+      }
+      // Proxy Image
+      else if (httpMethod === 'GET' && path === '/proxy-image') {
         handlerPromise = handleProxyImage(event);
-      } else if (httpMethod === 'POST' && path === '/refresh-token') {
-        // The refresh token endpoint should not require authentication
-        handlerPromise = handleRefreshToken(event, db);
-      } else if (httpMethod === 'GET' && path === '/auth/youtube/callback') {
-        // YouTube OAuth callback should not require authentication
+      }
+      // YouTube OAuth route
+      else if (httpMethod === 'GET' && path === '/auth/youtube/callback') {
         handlerPromise = handleYouTubeAuthCallback(event, db);
-      } else {
+      }
+      else {
         // Routes that require authentication
         try {
           const user = await authenticateToken(event);
 
           if (httpMethod === 'PUT' && path.startsWith('/editprofile/')) {
             handlerPromise = handleEditProfile(event, db, user);
-          } else if (httpMethod === 'POST' && path === '/newpost') {
+          }
+          // Game Plan
+          else if (httpMethod === 'POST' && path === '/new-gameplan') {
+            handlerPromise = handleNewGamePlan(event, db, user);
+          }
+          // Posts
+          else if (httpMethod === 'POST' && path === '/newpost') {
             handlerPromise = handleNewPost(event, db, user);
           } else if (httpMethod === 'PUT' && path.startsWith('/editpost/')) {
             handlerPromise = handleEditPost(event, db, user);
@@ -123,9 +150,13 @@ exports.handler = async (event) => {
             handlerPromise = handleEditPost(event, db, user);
           } else if (httpMethod === 'DELETE' && path.startsWith('/deletepost/')) {
             handlerPromise = handleDeletePost(event, db, user);
-          } else if (httpMethod === 'POST' && path === '/avatar') {
+          }
+          // Avatar
+           else if (httpMethod === 'POST' && path === '/avatar') {
             handlerPromise = handleUploadAvatar(event, db, user);
-          } else if (httpMethod === 'GET' && path === '/youtube/auth') {
+          }
+          // Youtube OAuth
+          else if (httpMethod === 'GET' && path === '/youtube/auth') {
             handlerPromise = handleYouTubeAuthUrl(event, db, user);
           } else if (httpMethod === 'GET' && path === '/youtube/token-check') {
             handlerPromise = handleYouTubeTokenCheck(event, db, user);
@@ -134,10 +165,8 @@ exports.handler = async (event) => {
           } else if (httpMethod === 'GET' && path === '/auth/youtube/callback') {
             handlerPromise = handleYouTubeAuthCallback(event, db, user);
           }
-          // Game Plan routes
-          else if (httpMethod === 'POST' && path === '/gameplans') {
-            handlerPromise = createGamePlan(event, db);
-          } else if (httpMethod === 'GET' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
+
+          else if (httpMethod === 'GET' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
             handlerPromise = getGamePlanById(event, db);
           } else if (httpMethod === 'PUT' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
             handlerPromise = updateGamePlan(event, db);
