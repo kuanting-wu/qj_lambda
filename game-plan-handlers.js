@@ -166,7 +166,7 @@ const handleSearchGamePlans = async (event, db) => {
     }
 };
 
-const getGamePlanById = async (event, db) => {
+const handleViewGamePlan = async (event, db) => {
     // Extract game plan ID from the path
     const gamePlanId = event.pathParameters?.id;
     if (!gamePlanId) {

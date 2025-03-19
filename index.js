@@ -112,7 +112,7 @@ exports.handler = async (event) => {
       // Posts routes
       else if (httpMethod === 'GET' && path.startsWith('/viewpost/')) {
         handlerPromise = handleViewPost(event, db);
-      } else if (httpMethod === 'GET' && path.startsWith('/viewprofile/')) {
+      } else if (httpMethod === 'GET' && path.startsWith('/view-profile/')) {
         handlerPromise = handleViewProfile(event, db);
       } else if (httpMethod === 'GET' && path === '/search-posts') {
         handlerPromise = handleSearchPosts(event, db);
@@ -134,7 +134,7 @@ exports.handler = async (event) => {
         try {
           const user = await authenticateToken(event);
 
-          if (httpMethod === 'PUT' && path.startsWith('/editprofile/')) {
+          if (httpMethod === 'PUT' && path.startsWith('/edit-profile/')) {
             handlerPromise = handleEditProfile(event, db, user);
           }
           // Game Plan
