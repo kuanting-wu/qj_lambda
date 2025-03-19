@@ -123,8 +123,6 @@ const handleSearchGamePlans = async (event, db) => {
             g.public_status = 'subscribers' OR 
             (g.public_status = 'private' AND g.user_id = $${paramCounter})
         )`);
-        queryParams.push(user_id);
-        paramCounter++;
 
         // Build the WHERE clause
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
