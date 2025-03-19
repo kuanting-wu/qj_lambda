@@ -85,12 +85,11 @@ const handleSearchGamePlans = async (event, db) => {
         const queryParams = [];
         let paramCounter = 1;
 
-        // Handle full-text search in game plan name and description
         if (search && search.trim() !== '') {
             const searchParam = `%${search.trim()}%`;
             conditions.push(`(g.name ILIKE $${paramCounter} OR g.description ILIKE $${paramCounter + 1})`);
             queryParams.push(searchParam, searchParam);
-            paramCounter += 2;  // Increment correctly to account for both search parameters
+            paramCounter += 2;
         }
 
         if (ownerUserId) {
@@ -111,13 +110,14 @@ const handleSearchGamePlans = async (event, db) => {
             paramCounter++;
         }
 
-        // Add privacy conditions (users can only see their own private game plans)
+        // Add privacy conditions
         conditions.push(`(
             g.public_status = 'public' OR 
             g.public_status = 'subscribers' OR 
             (g.public_status = 'private' AND g.user_id = $${paramCounter})
         )`);
         queryParams.push(ownerUserId);  // Add the ownerUserId here
+        paramCounter++;  // Increment after adding the second parameter
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
