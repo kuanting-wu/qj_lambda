@@ -48,7 +48,6 @@ const handleNewGamePlan = async (event, db, user) => {
 };
 
 const handleSearchGamePlans = async (event, db) => {
-    // Extract query parameters with defaults
     const {
         search = '',
         createdBy = '',
@@ -64,7 +63,6 @@ const handleSearchGamePlans = async (event, db) => {
     try {
         let ownerUserId = null;
 
-        // If createdBy (username) parameter is provided, find the corresponding user_id first
         if (createdBy) {
             const [userResult] = await db.execute(
                 'SELECT user_id FROM profiles WHERE username = $1',
@@ -83,7 +81,6 @@ const handleSearchGamePlans = async (event, db) => {
             }
         }
 
-        // Build query conditions based on filters
         const conditions = [];
         const queryParams = [];
         let paramCounter = 1;
@@ -93,24 +90,21 @@ const handleSearchGamePlans = async (event, db) => {
             const searchParam = `%${search.trim()}%`;
             conditions.push(`(g.name ILIKE $${paramCounter} OR g.description ILIKE $${paramCounter + 1})`);
             queryParams.push(searchParam, searchParam);
-            paramCounter += 2;
+            paramCounter += 2;  // Increment correctly to account for both search parameters
         }
 
-        // Filter by owner if specified
         if (ownerUserId) {
             conditions.push(`g.user_id = $${paramCounter}`);
             queryParams.push(ownerUserId);
             paramCounter++;
         }
 
-        // Filter by public status if specified
         if (publicStatus) {
             conditions.push(`g.public_status = $${paramCounter}`);
             queryParams.push(publicStatus);
             paramCounter++;
         }
 
-        // Filter by language if specified
         if (language) {
             conditions.push(`g.language = $${paramCounter}`);
             queryParams.push(language);
@@ -123,11 +117,10 @@ const handleSearchGamePlans = async (event, db) => {
             g.public_status = 'subscribers' OR 
             (g.public_status = 'private' AND g.user_id = $${paramCounter})
         )`);
+        queryParams.push(ownerUserId);  // Add the ownerUserId here
 
-        // Build the WHERE clause
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-        // Build the full query with all filters
         const fullQuery = `
             SELECT 
                 g.id, g.name, g.description, g.language, g.public_status,
@@ -143,7 +136,6 @@ const handleSearchGamePlans = async (event, db) => {
         console.log("Executing search game plans query:", fullQuery);
         console.log("With parameters:", queryParams);
 
-        // Execute the query
         const [results] = await db.execute(fullQuery, queryParams);
         console.log(`Found ${results.length} game plans`);
 
