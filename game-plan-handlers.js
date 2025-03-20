@@ -159,7 +159,6 @@ const handleSearchGamePlans = async (event, db) => {
 };
 
 const handleViewGamePlan = async (event, db) => {
-    // Extract game plan ID from the path
     const gamePlanId = event.pathParameters?.id;
     if (!gamePlanId) {
         return {
@@ -169,73 +168,48 @@ const handleViewGamePlan = async (event, db) => {
     }
 
     try {
-        // Get the game plan including the public_status field and owner details
-        const [gamePlans] = await db.execute(
-            'SELECT id, owner_id, name, description, language, public_status, created_at, updated_at FROM game_plans WHERE id = $1',
-            [gamePlanId]
-        );
+        // Fetch game plan and owner profile in one go
+        const [gamePlanResult] = await db.execute(`
+            SELECT gp.*, pr.name AS owner_name, pr.belt, pr.academy
+            FROM game_plans gp
+            LEFT JOIN profiles pr ON gp.owner_id = pr.user_id
+            WHERE gp.id = $1
+        `, [gamePlanId]);
 
-        if (gamePlans.length === 0) {
+        if (gamePlanResult.length === 0) {
             return {
                 statusCode: 404,
                 body: JSON.stringify({ error: "Game plan not found" })
             };
         }
 
-        // Get owner details from the users table
-        const [owner] = await db.execute(
-            'SELECT id, name FROM users WHERE id = $1',
-            [gamePlans[0].owner_id]
-        );
+        const gamePlan = gamePlanResult[0];
 
-        // Get all posts associated with this game plan
+        // Fetch related posts
         const [posts] = await db.execute(`
-            SELECT p.id, p.title, p.video_id, p.video_platform, p.owner_name, 
-                p.movement_type, p.starting_position, p.ending_position, 
-                p.starting_top_bottom, p.ending_top_bottom, p.gi_nogi,
-                p.practitioner, p.sequence_start_time, p.created_at,
-                p.language, p.notes_path
+            SELECT p.id, p.video_id, p.video_platform, p.title, pr.username,
+                   p.gi_nogi, p.practitioner, p.starting_position, p.ending_position,
+                   p.starting_top_bottom, p.ending_top_bottom, pr.belt, pr.academy,
+                   pr.avatar_url, p.movement_type, p.created_at
             FROM posts p
             JOIN game_plan_posts gpp ON p.id = gpp.post_id
+            JOIN profiles pr ON p.owner_id = pr.user_id
             WHERE gpp.game_plan_id = $1
             ORDER BY p.created_at DESC
         `, [gamePlanId]);
 
-        // Get all nodes (positions) used in this game plan
-        const [nodes] = await db.execute(`
-            SELECT DISTINCT n.position, n.top_bottom, n.id
-            FROM nodes n
-            JOIN posts p ON n.position IN (p.starting_position, p.ending_position)
-            JOIN game_plan_posts gpp ON p.id = gpp.post_id
-            WHERE gpp.game_plan_id = $1
-            ORDER BY n.position
-        `, [gamePlanId]);
-
-        // Get all edges (transitions) used in this game plan
-        const [edges] = await db.execute(`
-            SELECT DISTINCT e.from_position, e.to_position, e.id
-            FROM edges e
-            JOIN posts p ON e.from_position = p.starting_position AND e.to_position = p.ending_position
-            JOIN game_plan_posts gpp ON p.id = gpp.post_id
-            WHERE gpp.game_plan_id = $1
-        `, [gamePlanId]);
-
         return {
             statusCode: 200,
-            body: JSON.stringify({ 
-                game_plan: { ...gamePlans[0], owner },
-                posts,
-                graph: {
-                    nodes,
-                    edges
-                }
+            body: JSON.stringify({
+                game_plan: gamePlan,
+                posts
             })
         };
     } catch (error) {
-        console.error("Error fetching game plan:", error);
+        console.error("Error fetching game plan with posts:", error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: "Failed to fetch game plan", details: error.message })
+            body: JSON.stringify({ error: "Failed to fetch data", details: error.message })
         };
     }
 };
