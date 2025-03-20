@@ -272,13 +272,14 @@ const handleUpdateGamePlans = async (event, db, user) => {
     }
 
     try {
+        // Start the transaction using the cachedPool method
         await db.beginTransaction();
 
         for (const update of gamePlanUpdates) {
             const { gamePlanId, add } = update;
 
             if (add) {
-                // Add post to game plan if not already present
+                // Execute the query to add the post to the game plan
                 await db.execute(
                     `INSERT INTO game_plan_posts (game_plan_id, post_id) 
                      VALUES ($1, $2) 
@@ -286,7 +287,7 @@ const handleUpdateGamePlans = async (event, db, user) => {
                     [gamePlanId, postId]
                 );
             } else {
-                // Remove post from game plan
+                // Execute the query to remove the post from the game plan
                 await db.execute(
                     `DELETE FROM game_plan_posts WHERE game_plan_id = $1 AND post_id = $2`,
                     [gamePlanId, postId]
@@ -294,19 +295,25 @@ const handleUpdateGamePlans = async (event, db, user) => {
             }
         }
 
-        await db.commitTransaction();
+        // Commit the transaction using the cachedPool method
+        await db.commit();
 
         return {
             statusCode: 200,
             body: JSON.stringify({ message: 'Game plans updated successfully' }),
         };
     } catch (error) {
-        await db.rollbackTransaction();
+        // Rollback the transaction using the cachedPool method
+        await db.rollback();
+
         console.error('Error updating game plans:', error);
         return {
             statusCode: 500,
             body: JSON.stringify({ error: 'Failed to update game plans' }),
         };
+    } finally {
+        // Release the client connection (this will be handled by the pool itself)
+        // if necessary, e.g., in a more manual setup (but it's not needed here due to the pooling mechanism)
     }
 };
 
