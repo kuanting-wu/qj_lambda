@@ -316,3 +316,11 @@ const handleUpdateGamePlans = async (event, db, user) => {
         // if necessary, e.g., in a more manual setup (but it's not needed here due to the pooling mechanism)
     }
 };
+
+module.exports = {
+ handleListGamePlansWithStatus,
+ handleNewGamePlan,
+ handleSearchGamePlans,
+ handleUpdateGamePlans,
+ handleViewGamePlan,
+}
