@@ -227,7 +227,7 @@ const handleListGamePlansWithStatus = async (event, db, user) => {
     try {
         // Get all the user's game plans
         const [gamePlans] = await db.execute(
-            `SELECT id, name FROM game_plans WHERE user_id = $1`,
+            `SELECT id, name FROM game_plans WHERE owner_id = $1`,
             [user.user_id]
         );
 
