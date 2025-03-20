@@ -158,7 +158,7 @@ const handleSearchGamePlans = async (event, db) => {
     }
 };
 
-const handleViewGamePlan = async (event, db, user) => {
+const handleViewGamePlan = async (event, db) => {
     const gamePlanId = event.pathParameters.id;
     if (!gamePlanId) {
         return {
@@ -215,7 +215,7 @@ const handleViewGamePlan = async (event, db, user) => {
 };
 
 const handleListGamePlansWithStatus = async (event, db, user) => {
-    const postId = event.queryStringParameters.id;
+    const postId = event.pathParameters?.id;
 
     if (!postId) {
         return {
@@ -309,7 +309,6 @@ const handleUpdateGamePlans = async (event, db, user) => {
         };
     }
 };
-
 
 const updateGamePlan = async (event, db) => {
     // Extract game plan ID from the path
