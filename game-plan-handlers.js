@@ -65,13 +65,13 @@ const handleSearchGamePlans = async (event, db) => {
 
         if (createdBy) {
             const [userResult] = await db.execute(
-                'SELECT owner_id FROM profiles WHERE username = $1',
+                'SELECT user_id FROM profiles WHERE username = $1',
                 [createdBy]
             );
 
             if (userResult.length > 0) {
                 ownerUserId = userResult[0].user_id;
-                console.log(`Found owner_id ${ownerUserId} for username "${createdBy}"`);
+                console.log(`Found user_id ${ownerUserId} for username "${createdBy}"`);
             } else {
                 console.log(`No user found with username "${createdBy}"`);
                 return {
