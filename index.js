@@ -11,6 +11,7 @@ const {
   handleNewPost,
   handleEditPost,
   handleDeletePost,
+  handleForkPost,
 } = require('./post-handlers');
 
 const {
@@ -43,13 +44,15 @@ const {
   handleNewGamePlan,
   handleSearchGamePlans,
   handleViewGamePlan,
-  handleUpdateGamePlan,
-  handleDeleteGamePlan,
-  handleAddPostToGamePlan,
-  handleRemovePostFromGamePlan,
-  handleGetPostsByPosition,
-  handleGetPostsByTransition,
-  handleGetAllPositions,
+  handleListGamePlansWithStatus,
+  handleUpdateGamePlans,
+  UpdateGamePlan,
+  DeleteGamePlan,
+  AddPostToGamePlan,
+  RemovePostFromGamePlan,
+  GetPostsByPosition,
+  GetPostsByTransition,
+  GetAllPositions,
 } = require('./game-plan-handlers');
 
 // Set a timeout function to guard against hanging operations
@@ -142,6 +145,10 @@ exports.handler = async (event) => {
           // Game Plan
           else if (httpMethod === 'POST' && path === '/new-gameplan') {
             handlerPromise = handleNewGamePlan(event, db, user);
+          } else if (httpMethod === 'GET' && path.startsWith('/list-gameplans/')) {
+            handlerPromise = handleListGamePlansWithStatus(event, db, user);
+          } else if (httpMethod === 'POST' && path.startsWith('/update-gameplans/')) {
+            handlerPromise = handleUpdateGamePlans(event, db, user);
           }
           // Posts
           else if (httpMethod === 'POST' && path === '/newpost') {
@@ -152,6 +159,8 @@ exports.handler = async (event) => {
             handlerPromise = handleEditPost(event, db, user);
           } else if (httpMethod === 'DELETE' && path.startsWith('/deletepost/')) {
             handlerPromise = handleDeletePost(event, db, user);
+          } else if (httpMethod === 'POST' && path === '/fork-post') {
+            handlerPromise = handleForkPost(event, db, user);
           }
           // Avatar
           else if (httpMethod === 'POST' && path === '/avatar') {
@@ -167,16 +176,12 @@ exports.handler = async (event) => {
           } else if (httpMethod === 'GET' && path === '/auth/youtube/callback') {
             handlerPromise = handleYouTubeAuthCallback(event, db, user);
           }
-          else if (httpMethod === 'PUT' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
-            handlerPromise = updateGamePlan(event, db);
-          } else if (httpMethod === 'DELETE' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
+          else if (httpMethod === 'DELETE' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
             handlerPromise = deleteGamePlan(event, db);
           } else if (httpMethod === 'POST' && path.startsWith('/gameplans/') && !path.includes('/posts/')) {
             handlerPromise = addPostToGamePlan(event, db);
           } else if (httpMethod === 'DELETE' && path.match(/^\/gameplans\/[^\/]+\/posts\/[^\/]+$/)) {
             handlerPromise = removePostFromGamePlan(event, db);
-          } else if (httpMethod === 'GET' && path.startsWith('/gameplans/') && path.includes('/positions')) {
-            handlerPromise = getPostsByPosition(event, db);
           } else if (httpMethod === 'GET' && path.startsWith('/gameplans/') && path.includes('/transitions')) {
             handlerPromise = getPostsByTransition(event, db);
           } else if (httpMethod === 'GET' && path === '/positions') {

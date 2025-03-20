@@ -705,10 +705,64 @@ const handleDeletePost = async (event, db, user) => {
     }
 };
 
+const handleForkPost = async (event, db, user) => {
+    const { postId } = JSON.parse(event.body);
+
+    if (!postId) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: 'Post ID is required' }),
+        };
+    }
+
+    try {
+        // Get original post data
+        const [post] = await db.execute(`SELECT * FROM posts WHERE id = $1`, [postId]);
+
+        if (post.length === 0) {
+            return {
+                statusCode: 404,
+                body: JSON.stringify({ error: 'Post not found' }),
+            };
+        }
+
+        const newPostId = uuidv7();
+
+        // Insert a new post using the original data but under the current user
+        await db.execute(
+            `INSERT INTO posts (
+                id, title, video_id, video_platform, owner_id, movement_type, 
+                starting_position, ending_position, starting_top_bottom, ending_top_bottom, 
+                gi_nogi, practitioner, sequence_start_time, public_status, language, notes_path
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+            [
+                newPostId, post[0].title, post[0].video_id, post[0].video_platform,
+                user.user_id, post[0].movement_type, post[0].starting_position,
+                post[0].ending_position, post[0].starting_top_bottom, post[0].ending_top_bottom,
+                post[0].gi_nogi, post[0].practitioner, post[0].sequence_start_time,
+                post[0].public_status, post[0].language, post[0].notes_path
+            ]
+        );
+
+        return {
+            statusCode: 201,
+            body: JSON.stringify({ message: 'Post forked successfully', newPostId }),
+        };
+    } catch (error) {
+        console.error('Error forking post:', error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: 'Failed to fork post' }),
+        };
+    }
+};
+
+
 module.exports = {
     handleViewPost,
     handleSearchPosts,
     handleNewPost,
     handleEditPost,
     handleDeletePost,
+    handleForkPost,
   };

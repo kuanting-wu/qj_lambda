@@ -158,8 +158,8 @@ const handleSearchGamePlans = async (event, db) => {
     }
 };
 
-const handleViewGamePlan = async (event, db) => {
-    const gamePlanId = event.pathParameters?.id;
+const handleViewGamePlan = async (event, db, user) => {
+    const gamePlanId = event.pathParameters.id;
     if (!gamePlanId) {
         return {
             statusCode: 400,
@@ -213,6 +213,103 @@ const handleViewGamePlan = async (event, db) => {
         };
     }
 };
+
+const handleListGamePlansWithStatus = async (event, db, user) => {
+    const postId = event.queryStringParameters.id;
+
+    if (!postId) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: 'Post ID is required' }),
+        };
+    }
+
+    try {
+        // Get all the user's game plans
+        const [gamePlans] = await db.execute(
+            `SELECT id, name FROM game_plans WHERE user_id = $1`,
+            [user.id]
+        );
+
+        // Get the game plans that contain the post
+        const [gamePlansWithPost] = await db.execute(
+            `SELECT game_plan_id FROM game_plan_posts WHERE post_id = $1`,
+            [postId]
+        );
+
+        // Create a Set for quick lookup
+        const gamePlanIdsWithPost = new Set(gamePlansWithPost.map(row => row.game_plan_id));
+
+        // Map the result to include `containsPost` status
+        const result = gamePlans.map(plan => ({
+            id: plan.id,
+            name: plan.name,
+            containsPost: gamePlanIdsWithPost.has(plan.id)
+        }));
+
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ gamePlans: result }),
+        };
+    } catch (error) {
+        console.error('Error fetching game plans:', error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: 'Failed to fetch game plans' }),
+        };
+    }
+};
+
+const handleUpdateGamePlans = async (event, db, user) => {
+    const postId = event.pathParameters?.id;
+    const { gamePlanUpdates } = JSON.parse(event.body);
+
+    if (!postId || !Array.isArray(gamePlanUpdates)) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: 'Post ID and gamePlanUpdates are required' }),
+        };
+    }
+
+    try {
+        await db.beginTransaction();
+
+        for (const update of gamePlanUpdates) {
+            const { gamePlanId, add } = update;
+
+            if (add) {
+                // Add post to game plan if not already present
+                await db.execute(
+                    `INSERT INTO game_plan_posts (game_plan_id, post_id) 
+                     VALUES ($1, $2) 
+                     ON CONFLICT (game_plan_id, post_id) DO NOTHING`,
+                    [gamePlanId, postId]
+                );
+            } else {
+                // Remove post from game plan
+                await db.execute(
+                    `DELETE FROM game_plan_posts WHERE game_plan_id = $1 AND post_id = $2`,
+                    [gamePlanId, postId]
+                );
+            }
+        }
+
+        await db.commitTransaction();
+
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ message: 'Game plans updated successfully' }),
+        };
+    } catch (error) {
+        await db.rollbackTransaction();
+        console.error('Error updating game plans:', error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: 'Failed to update game plans' }),
+        };
+    }
+};
+
 
 const updateGamePlan = async (event, db) => {
     // Extract game plan ID from the path
@@ -615,6 +712,9 @@ module.exports = {
     handleNewGamePlan,
     handleSearchGamePlans,
     handleViewGamePlan,
+    handleListGamePlansWithStatus,
+    handleUpdateGamePlans,
+
     updateGamePlan,
     deleteGamePlan,
     addPostToGamePlan,
