@@ -170,7 +170,7 @@ const handleViewGamePlan = async (event, db) => {
     try {
         // Fetch game plan and owner profile in one go
         const [gamePlanResult] = await db.execute(`
-            SELECT gp.*, pr.name AS owner_name, pr.belt, pr.academy
+            SELECT gp.*, pr.name AS owner_name, pr.belt, pr.academy, pr.avatar_url
             FROM game_plans gp
             LEFT JOIN profiles pr ON gp.owner_id = pr.user_id
             WHERE gp.id = $1
