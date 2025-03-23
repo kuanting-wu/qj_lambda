@@ -76,7 +76,7 @@ const handleSearchPosts = async (event, db) => {
     // Extract query parameters with defaults
     const {
         search = '',
-        postBy = '',
+        ownerName = '',
         movementType = '',
         startingPosition = '',
         endingPosition = '',
@@ -90,7 +90,7 @@ const handleSearchPosts = async (event, db) => {
     } = event.queryStringParameters || {};
 
     console.log("Extracted parameters:", {
-        search, postBy, movementType, startingPosition, endingPosition,
+        search, ownerName, movementType, startingPosition, endingPosition,
         startingTopBottom, endingTopBottom, giNogi, practitioner,
         publicStatus, language, sortOption
     });
@@ -104,18 +104,18 @@ const handleSearchPosts = async (event, db) => {
     console.log("Current user context:", { currentUser, currentUserId });
 
     try {
-        // Resolve postBy (username) to owner_id if provided
+        // Resolve ownerName (username) to owner_id if provided
         let ownerUserId = null;
-        if (postBy) {
+        if (ownerName) {
             const [userResult] = await db.execute(
                 'SELECT user_id FROM profiles WHERE username = $1',
-                [postBy]
+                [ownerName]
             );
             if (userResult.length > 0) {
                 ownerUserId = userResult[0].user_id;
-                console.log(`Found user_id ${ownerUserId} for username "${postBy}"`);
+                console.log(`Found user_id ${ownerUserId} for username "${ownerName}"`);
             } else {
-                console.log(`No user found with username "${postBy}"`);
+                console.log(`No user found with username "${ownerName}"`);
                 return {
                     statusCode: 200,
                     body: JSON.stringify({ posts: [], count: 0 })
@@ -216,10 +216,10 @@ const handleSearchPosts = async (event, db) => {
                     p.created_at ${sortOrder}
             `;
         } else {
-            orderByClause = `ORDER BY p.created_at ${sortOrder}`;
+            orderByClause = `ORDER BY p.created_at ${sortOrder}`; // Could sort by updated_at if preferred
         }
 
-        // Full query including all table fields
+        // Full query including updated_at
         const fullQuery = `
           SELECT 
             p.id,
@@ -238,7 +238,7 @@ const handleSearchPosts = async (event, db) => {
             p.language,
             p.notes_path,
             p.created_at,
-            p.updated_at,
+            p.updated_at,  -- Added back now that column exists
             pr.username,
             pr.belt,
             pr.academy,
@@ -258,7 +258,7 @@ const handleSearchPosts = async (event, db) => {
         const [results] = await db.execute(fullQuery, queryParams);
         console.log(`Found ${results.length} results`);
 
-        // Return results as-is (snake_case) since frontend will map to camelCase
+        // Return results as-is (snake_case) since frontend maps to camelCase
         return {
             statusCode: 200,
             body: JSON.stringify({
