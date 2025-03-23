@@ -185,12 +185,14 @@ const handleViewGamePlan = async (event, db) => {
 
         const gamePlan = gamePlanResult[0];
 
-        // Fetch related posts
+        // Fetch related posts with all fields from the posts table
         const [posts] = await db.execute(`
-            SELECT p.id, p.video_id, p.video_platform, p.title, pr.username,
-                   p.gi_nogi, p.practitioner, p.starting_position, p.ending_position,
-                   p.starting_top_bottom, p.ending_top_bottom, pr.belt, pr.academy,
-                   pr.avatar_url, p.movement_type, p.created_at
+            SELECT p.id, p.title, p.video_id, p.video_platform, pr.username,
+                   p.movement_type, p.starting_position, p.ending_position,
+                   p.starting_top_bottom, p.ending_top_bottom, p.gi_nogi,
+                   p.practitioner, p.sequence_start_time, p.public_status,
+                   p.language, p.notes_path, p.created_at, p.updated_at,
+                   pr.name AS owner_name, pr.belt, pr.academy, pr.avatar_url
             FROM posts p
             JOIN game_plan_posts gpp ON p.id = gpp.post_id
             JOIN profiles pr ON p.owner_id = pr.user_id
