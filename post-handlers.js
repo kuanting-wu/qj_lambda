@@ -90,65 +90,56 @@ const handleSearchPosts = async (event, db) => {
     } = event.queryStringParameters || {};
 
     console.log("Extracted parameters:", {
-        search, postBy, movementType, startingPosition,
-        endingPosition, startingTopBottom, endingTopBottom,
-        giNogi, practitioner, publicStatus, language, sortOption
+        search, postBy, movementType, startingPosition, endingPosition,
+        startingTopBottom, endingTopBottom, giNogi, practitioner,
+        publicStatus, language, sortOption
     });
 
     const sortOrder = sortOption === 'oldToNew' ? 'ASC' : 'DESC';
 
-    // Get the current user from the event (simulating the authenticated user)
+    // Get current user from event (authenticated user)
     const currentUser = event.requestContext?.authorizer?.username || null;
     const currentUserId = event.requestContext?.authorizer?.user_id || null;
 
     console.log("Current user context:", { currentUser, currentUserId });
 
     try {
-        // If postBy (username) parameter is provided, find the corresponding user_id first
+        // Resolve postBy (username) to owner_id if provided
         let ownerUserId = null;
-
         if (postBy) {
             const [userResult] = await db.execute(
                 'SELECT user_id FROM profiles WHERE username = $1',
                 [postBy]
             );
-
             if (userResult.length > 0) {
                 ownerUserId = userResult[0].user_id;
                 console.log(`Found user_id ${ownerUserId} for username "${postBy}"`);
             } else {
                 console.log(`No user found with username "${postBy}"`);
-                // If no user found with that username, return empty results
                 return {
                     statusCode: 200,
-                    body: JSON.stringify({
-                        posts: [],
-                        count: 0
-                    })
+                    body: JSON.stringify({ posts: [], count: 0 })
                 };
             }
         }
 
-        // Build query conditions based on filters
+        // Build query conditions
         const conditions = [];
         const queryParams = [];
         let paramCounter = 1;
 
-        // Handle the full-text search
         if (search && search.trim() !== '') {
             conditions.push(`p.search_vector @@ plainto_tsquery('english', $${paramCounter})`);
             queryParams.push(search.trim());
             paramCounter++;
         }
 
-        // Filter by user if specified
         if (ownerUserId) {
             conditions.push(`p.owner_id = $${paramCounter}`);
             queryParams.push(ownerUserId);
             paramCounter++;
         }
 
-        // Add other filter conditions
         if (movementType) {
             conditions.push(`p.movement_type = $${paramCounter}`);
             queryParams.push(movementType);
@@ -203,7 +194,7 @@ const handleSearchPosts = async (event, db) => {
             paramCounter++;
         }
 
-        // Add privacy conditions (always include)
+        // Privacy condition: public, subscribers, or private owned by current user
         const privacyCondition = `(
             p.public_status = 'public' OR 
             p.public_status = 'subscribers' OR
@@ -213,16 +204,11 @@ const handleSearchPosts = async (event, db) => {
         queryParams.push(currentUserId || 0);
         paramCounter++;
 
-        // Build the WHERE clause
-        const whereClause = conditions.length > 0
-            ? `WHERE ${conditions.join(' AND ')}`
-            : '';
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-        // Determine ranking/sorting
+        // Sorting: relevance (if search) then date
         let orderByClause = '';
         if (search && search.trim() !== '') {
-            // If search is provided, rank results by relevance first, then by date
-            // We need to reuse the same search text parameter for ranking that we used for filtering
             const searchParamIndex = queryParams.findIndex(param => param === search.trim()) + 1;
             orderByClause = `
                 ORDER BY 
@@ -230,29 +216,33 @@ const handleSearchPosts = async (event, db) => {
                     p.created_at ${sortOrder}
             `;
         } else {
-            // Otherwise, just sort by date
             orderByClause = `ORDER BY p.created_at ${sortOrder}`;
         }
 
-        // Complete query with all filters
+        // Full query including all table fields
         const fullQuery = `
           SELECT 
             p.id,
+            p.title,
             p.video_id,
             p.video_platform,
-            p.title,
-            pr.username,
-            p.gi_nogi,
-            p.practitioner,
-            p.starting_top_bottom,
-            p.ending_top_bottom,
+            p.movement_type,
             p.starting_position,
             p.ending_position,
+            p.starting_top_bottom,
+            p.ending_top_bottom,
+            p.gi_nogi,
+            p.practitioner,
+            p.sequence_start_time,
+            p.public_status,
+            p.language,
+            p.notes_path,
+            p.created_at,
+            p.updated_at,
+            pr.username,
             pr.belt,
             pr.academy,
-            pr.avatar_url,
-            p.movement_type,
-            p.created_at
+            pr.avatar_url
           FROM 
             posts p
           JOIN 
@@ -262,57 +252,27 @@ const handleSearchPosts = async (event, db) => {
           LIMIT 100
         `;
 
-        // Log query and parameters
         console.log("Executing search query:", fullQuery);
         console.log("With parameters:", queryParams);
 
-        // Execute the query
         const [results] = await db.execute(fullQuery, queryParams);
         console.log(`Found ${results.length} results`);
 
-        // Format the results
-        const formattedResults = results.map(post => ({
-            id: post.id,
-            video_id: post.video_id,
-            video_platform: post.video_platform,
-            title: post.title,
-            username: post.username,
-            gi_nogi: post.gi_nogi,
-            practitioner: post.practitioner,
-            starting_position: post.starting_position,
-            ending_position: post.ending_position,
-            starting_top_bottom: post.starting_top_bottom,
-            ending_top_bottom: post.ending_top_bottom,
-            belt: post.belt,
-            academy: post.academy,
-            avatar_url: post.avatar_url,
-            movement_type: post.movement_type,
-            created_at: post.created_at,
-        }));
-
-        // Return the formatted results
+        // Return results as-is (snake_case) since frontend will map to camelCase
         return {
             statusCode: 200,
             body: JSON.stringify({
-                posts: formattedResults,
-                count: formattedResults.length
+                posts: results,
+                count: results.length
             }),
         };
     } catch (error) {
         console.error("Error executing search:", error);
-        console.error('Error details:', {
-            message: error.message,
-            stack: error.stack,
-            code: error.code,
-            query: error.query
-        });
-
         return {
             statusCode: 500,
             body: JSON.stringify({
-                error: 'Failed to fetch posts',
-                details: process.env.NODE_ENV === 'development' ? error.message : undefined,
-                code: process.env.NODE_ENV === 'development' ? error.code : undefined
+                error: "Failed to fetch posts",
+                details: process.env.NODE_ENV === "development" ? error.message : undefined
             }),
         };
     }
