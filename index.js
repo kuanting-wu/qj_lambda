@@ -46,13 +46,7 @@ const {
   handleViewGamePlan,
   handleListGamePlansWithStatus,
   handleUpdateGamePlans,
-  UpdateGamePlan,
-  DeleteGamePlan,
-  AddPostToGamePlan,
-  RemovePostFromGamePlan,
-  GetPostsByPosition,
-  GetPostsByTransition,
-  GetAllPositions,
+  handleEditGamePlan,
 } = require('./game-plan-handlers');
 
 // Set a timeout function to guard against hanging operations
@@ -149,6 +143,10 @@ exports.handler = async (event) => {
             handlerPromise = handleListGamePlansWithStatus(event, db, user);
           } else if (httpMethod === 'POST' && path.startsWith('/update-gameplans/')) {
             handlerPromise = handleUpdateGamePlans(event, db, user);
+          } else if (httpMethod === 'PUT' && path.startsWith('/edit-gameplan/')) {
+            handlerPromise = handleEditGamePlan(event, db, user);
+          } else if (httpMethod === 'HEAD' && path.startsWith('/editgameplan/')) {
+            handlerPromise = handleEditGamePlan(event, db, user);
           }
           // Posts
           else if (httpMethod === 'POST' && path === '/newpost') {

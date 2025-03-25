@@ -319,10 +319,134 @@ const handleUpdateGamePlans = async (event, db, user) => {
     }
 };
 
+const handleEditGamePlan = async (event, db, user) => {
+    const gamePlanId = event.pathParameters.id;
+
+    console.log("EditGamePlan handler called for gamePlanId:", gamePlanId);
+    console.log("Event headers:", JSON.stringify(event.headers));
+
+    // Authenticate user
+    try {
+        user = await authenticateToken(event);
+        console.log(`Authenticated user: ${user.user_id}`);
+    } catch (authError) {
+        console.error('Authentication failed:', authError.message);
+        return {
+            statusCode: 401,
+            body: JSON.stringify({ error: 'Unauthorized' })
+        };
+    }
+
+    // Fetch existing game plan to verify ownership
+    const [gamePlanResults] = await db.execute('SELECT owner_id FROM game_plans WHERE id = $1', [gamePlanId]);
+    if (gamePlanResults.length === 0) {
+        console.log(`Game plan with id ${gamePlanId} not found`);
+        return {
+            statusCode: 404,
+            body: JSON.stringify({ error: 'Game plan not found' })
+        };
+    }
+
+    const gamePlanOwnerId = gamePlanResults[0].owner_id;
+    if (user.user_id !== gamePlanOwnerId) {
+        console.log(`User ${user.user_id} is not the owner of game plan ${gamePlanId}`);
+        return {
+            statusCode: 403,
+            body: JSON.stringify({ error: 'User not authorized to edit this game plan' })
+        };
+    }
+
+    // Handle HEAD request for permission check
+    if (event.httpMethod === 'HEAD') {
+        return {
+            statusCode: 200
+        };
+    }
+
+    // Handle PUT request for updating game plan
+    if (event.httpMethod === 'PUT') {
+        const parsedBody = JSON.parse(event.body);
+        const { name, description, language, public_status } = parsedBody;
+
+        // Validate required fields
+        if (!name || !language || !public_status) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'Required fields (name, language, public_status) are missing' })
+            };
+        }
+
+        // Validate language
+        const allowedLanguages = ['English', 'Japanese', 'Traditional Chinese'];
+        if (!allowedLanguages.includes(language)) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: `Language must be one of: ${allowedLanguages.join(', ')}` })
+            };
+        }
+
+        // Validate public_status
+        const allowedStatuses = ['public', 'private', 'subscribers'];
+        if (!allowedStatuses.includes(public_status)) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: 'Public status must be one of: "public", "private", "subscribers"' })
+            };
+        }
+
+        try {
+            // Update game plan in the database
+            const updateQuery = `
+                UPDATE game_plans
+                SET
+                    name = $1,
+                    description = $2,
+                    language = $3,
+                    public_status = $4,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $5 AND owner_id = $6
+                RETURNING id, name, description, language, public_status, created_at, updated_at
+            `;
+
+            const [result] = await db.execute(updateQuery, [
+                name,
+                description,
+                language,
+                public_status,
+                gamePlanId,
+                user.user_id,
+            ]);
+
+            // Return success response with updated game plan data
+            return {
+                statusCode: 200,
+                body: JSON.stringify({
+                    message: 'Game plan updated successfully',
+                    game_plan: result[0],
+                })
+            };
+        } catch (error) {
+            console.error('Error updating game plan:', error);
+            return {
+                statusCode: 500,
+                body: JSON.stringify({ error: 'Failed to update the game plan', details: error.message })
+            };
+        }
+    }
+
+    // If method is neither HEAD nor PUT, return method not allowed
+    return {
+        statusCode: 405,
+        body: JSON.stringify({ error: 'Method not allowed' })
+    };
+};
+
+
 module.exports = {
  handleListGamePlansWithStatus,
  handleNewGamePlan,
  handleSearchGamePlans,
  handleUpdateGamePlans,
  handleViewGamePlan,
+ handleEditGamePlan,
 }
