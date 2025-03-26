@@ -145,7 +145,7 @@ exports.handler = async (event) => {
             handlerPromise = handleUpdateGamePlans(event, db, user);
           } else if (httpMethod === 'PUT' && path.startsWith('/edit-gameplan/')) {
             handlerPromise = handleEditGamePlan(event, db, user);
-          } else if (httpMethod === 'HEAD' && path.startsWith('/editgameplan/')) {
+          } else if (httpMethod === 'HEAD' && path.startsWith('/edit-gameplan/')) {
             handlerPromise = handleEditGamePlan(event, db, user);
           }
           // Posts
