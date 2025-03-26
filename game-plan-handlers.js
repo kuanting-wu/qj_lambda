@@ -1,3 +1,5 @@
+const { authenticateToken } = require('./auth');
+
 const handleNewGamePlan = async (event, db, user) => {
     // Parse request body
     let requestBody;
