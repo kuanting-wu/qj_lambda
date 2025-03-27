@@ -25,6 +25,7 @@ const handleViewPost = async (event, db) => {
         language,
         notes_path,
         created_at,
+        updated_at,
         owner_name,
         avatar_url,
         belt,
