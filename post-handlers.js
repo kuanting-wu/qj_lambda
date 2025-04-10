@@ -239,7 +239,7 @@ const handleSearchPosts = async (event, db) => {
             p.language,
             p.notes_path,
             p.created_at,
-            p.updated_at,  -- Added back now that column exists
+            p.updated_at,
             pr.username,
             pr.belt,
             pr.academy,
@@ -250,7 +250,7 @@ const handleSearchPosts = async (event, db) => {
             profiles pr ON p.owner_id = pr.user_id
           ${whereClause}
           ${orderByClause}
-          LIMIT 100
+          LIMIT 50
         `;
 
         console.log("Executing search query:", fullQuery);
